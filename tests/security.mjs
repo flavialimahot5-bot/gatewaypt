@@ -198,6 +198,31 @@ await test("cross-origin administrative writes are rejected", async () => {
     403,
   );
 });
+await test("cross-origin administrative validation handles configured and Vercel production origins safely", () => {
+  const keys = ["VERCEL", "VERCEL_ENV", "VERCEL_PROJECT_PRODUCTION_URL"];
+  const previous = keys.map(key => process.env[key]);
+  const request = (origin, site = "same-origin", extra = {}) => new Request("https://internal.example/api/admin/products", {
+    method: "POST", headers: { ...(origin === undefined ? {} : { Origin: origin }), "Sec-Fetch-Site": site, ...extra },
+  });
+  const denied = (r, expected) => assert.throws(() => m.assertOrigin(r, expected), { code: "invalid_origin" });
+  try {
+    keys.forEach(key => delete process.env[key]);
+    m.assertOrigin(request("https://gatewaypt.vercel.app"), " https://GATEWAYPT.vercel.app:443/ \n");
+    denied(request("https://gatewaypt.vercel.app"), "");
+    denied(request("https://gatewaypt.vercel.app"), "https://gatewaypt.vercel.app/admin");
+    Object.assign(process.env, { VERCEL: "1", VERCEL_ENV: "production", VERCEL_PROJECT_PRODUCTION_URL: "gatewaypt.vercel.app" });
+    m.assertOrigin(request("https://gatewaypt.vercel.app"), "http://127.0.0.1:5173");
+    m.assertOrigin(request("https://shop.example.com"), "https://shop.example.com/");
+    for (const origin of [undefined, "null", "https://evil.vercel.app", "https://gatewaypt.vercel.app.evil.com", "http://gatewaypt.vercel.app", "https://gatewaypt.vercel.app:444"]) {
+      denied(request(origin, "same-origin", { Host: "gatewaypt.vercel.app", "X-Forwarded-Host": "gatewaypt.vercel.app" }), "");
+    }
+    denied(request("https://gatewaypt.vercel.app", "cross-site"), "https://gatewaypt.vercel.app");
+    process.env.VERCEL_ENV = "preview";
+    denied(request("https://gatewaypt.vercel.app"), "https://preview.example.com");
+  } finally {
+    keys.forEach((key, i) => { if (previous[i] === undefined) delete process.env[key]; else process.env[key] = previous[i]; });
+  }
+});
 await test("API keys are stored as hashes and scoped to separate integrations", async () => {
   keyA = (
     await result(

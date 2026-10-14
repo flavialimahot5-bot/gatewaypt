@@ -106,10 +106,28 @@ export function safeCallback(value: string, allowed: string) {
     );
   return u.href;
 }
+function configuredOrigin(value: string) {
+  try {
+    const url = new URL(value.trim());
+    if (!["https:", "http:"].includes(url.protocol) || url.username || url.password ||
+      url.pathname !== "/" || url.search || url.hash) return null;
+    return url.origin;
+  } catch { return null; }
+}
 export function assertOrigin(request: Request, expected: string) {
+  const allowed = new Set<string>();
+  const configured = configuredOrigin(expected);
+  if (configured) allowed.add(configured);
+  // Trust only server-provided deployment metadata, never Host/forwarded headers.
+  // Production's domain must not authorize writes to a preview deployment.
+  if (process.env.VERCEL === "1" && process.env.VERCEL_ENV === "production") {
+    const domain = process.env.VERCEL_PROJECT_PRODUCTION_URL?.trim();
+    const production = domain && configuredOrigin(`https://${domain}`);
+    if (production) allowed.add(production);
+  }
+  const origin = request.headers.get("origin");
   if (
-    !expected ||
-    request.headers.get("origin") !== expected ||
+    !origin || !allowed.has(origin) ||
     request.headers.get("sec-fetch-site") === "cross-site"
   )
     throw new ApiError(
