@@ -32,6 +32,7 @@ b=body();mode='timeout';await assert.rejects(()=>m.ptCreate(req(b),'digital'),e=
 b=body();mode='blocked';await assert.rejects(()=>m.ptCreate(req(b),'digital'),e=>e.retryAfter===240);prev=calls.length;await assert.rejects(()=>m.ptCreate(req(b),'digital'),e=>e.code==='retry_later');assert.equal(calls.length,prev);
 const fallback=await m.ptCreate(req(body()),'digital');sql.prepare('UPDATE pt_orders SET created_at=? WHERE id=?').run(Date.now()-61000,fallback.id);prev=calls.length;await m.ptStatus(fallback.id);await m.ptStatus(fallback.id);assert.equal(calls.length,prev+1);
 const qty=await m.ptCreate(req({...body(),quantity:3}),'digital');assert.equal(qty.amount,5970);await assert.rejects(()=>m.ptCreate(req({...body(),quantity:101}),'digital'));
+const physicalBody={...body(),customer:{...body().customer,address:{line1:'Rua de Teste, 10',line2:'2º Esq.',postal_code:'1000-001',city:'Lisboa',region:'Lisboa',country:'PT'}}};const physicalOrder=await m.ptCreate(req(physicalBody),'physical');assert.equal(physicalOrder.amount,2240);assert.deepEqual(JSON.parse(calls.at(-1).opts.body).customer.address,physicalBody.customer.address);
 globalThis.__pt.env.PUBLIC_API_ENABLED='false';await assert.rejects(()=>m.ptCreate(req(body()),'digital'),e=>e.code==='payments_disabled');
 console.log('Portugal: signature, normalization, server prices, idempotency, timeout replay, phone blocking, webhook mismatch/dedupe/order, refund replay, voucher expiry and bounded fallback passed. No real network requests.');
 

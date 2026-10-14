@@ -1,6 +1,6 @@
 import {writeFileSync} from 'node:fs';
 const str={type:'string'};
-const address={type:'object',required:['line1','postal_code','city'],additionalProperties:false,properties:{line1:str,line2:str,postal_code:{type:'string',pattern:'^[0-9]{4}-[0-9]{3}$'},city:str,country:{type:'string',enum:['PT']}}};
+const address={type:'object',required:['line1','postal_code','city'],additionalProperties:false,properties:{line1:str,line2:str,postal_code:{type:'string',pattern:'^[0-9]{4}-[0-9]{3}$'},city:str,region:str,country:{type:'string',enum:['PT']}}};
 const customer={type:'object',required:['name','email'],additionalProperties:false,properties:{name:str,email:{type:'string',format:'email'},phone:str,nif:str,address}};
 const create={type:'object',required:['attempt','method','customer'],additionalProperties:false,properties:{attempt:{type:'string',format:'uuid'},visit:{type:'string',format:'uuid'},quantity:{type:'integer',minimum:1,maximum:100,default:1},method:{type:'string',enum:['mbway','multibanco']},customer}};
 const parameter=(name)=>({name,in:'path',required:true,schema:str});
