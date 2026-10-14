@@ -1,0 +1,20 @@
+{
+  "id": "/?app=braks-pay",
+  "name": "Goti Pay",
+  "short_name": "Goti Pay",
+  "description": "Sua operação Pix e alertas de vendas.",
+  "start_url": "/topsdlsodo?app=braks-pay",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#071d22",
+  "theme_color": "#071d22",
+  "lang": "pt-BR",
+  "icons": [
+    {
+      "src": "/goti-pay-avatar.jpg",
+      "sizes": "900x900",
+      "type": "image/jpeg",
+      "purpose": "any"
+    }
+  ]
+}

@@ -1,0 +1,298 @@
+openapi: 3.1.0
+info:
+  title: API Broski
+  version: "1.0"
+  description: |
+    API do gateway Broski para pagamentos por **MB WAY** e **Multibanco** (EUR, Portugal).
+    Base URL: `https://api.broski.pt`. Autenticação por chave secreta (`Authorization: Bearer sk_live_…`),
+    gerada no painel em Configurações → API. Valores sempre em **cêntimos** (inteiros).
+    Guias completos em https://docs.broski.pt.
+    A API é exclusivamente servidor→servidor (CORS bloqueia browser); fluxo 100% server-side — sem SDK, client_secret, iframe ou redirect.
+servers:
+  - url: https://api.broski.pt
+security:
+  - chaveSecreta: []
+tags:
+  - name: Pedidos
+  - name: Estornos
+paths:
+  /v1/orders:
+    post:
+      tags: [Pedidos]
+      summary: Criar pedido
+      operationId: criarPedido
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 128 }
+          description: "Obrigatório. Reenvios com a MESMA chave e o MESMO corpo devolvem a resposta original (header `Idempotent-Replay: true`). Mesma chave com corpo diferente → 409. Retenção garantida ≥ 24 h."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/NovoPedido" }
+            examples:
+              mbway:
+                value: { amount: 1990, method: mbway, phone: "+351912345678", external_reference: "pedido-1042", description: "Curso de tráfego pago", checkout_url: "https://sualoja.pt/checkout/curso-de-trafego", customer: { name: "Ana Cliente", email: "ana@exemplo.pt" } }
+              multibanco:
+                value: { amount: 4990, method: multibanco, external_reference: "pedido-1043", checkout_url: "https://sualoja.pt/checkout/ebook", customer: { email: "rui@exemplo.pt" } }
+      responses:
+        "201":
+          description: Pedido criado. MB WAY nasce `pending` (cliente confirma no telemóvel); Multibanco nasce `awaiting_payment` com o voucher (exiba entidade, referência e valor ao cliente).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Pedido" }
+        "400": { $ref: "#/components/responses/Erro400" }
+        "401": { $ref: "#/components/responses/Erro401" }
+        "402":
+          description: "O pagamento não pôde ser iniciado. O pedido é desfeito — a mesma `external_reference` pode ser reutilizada. Códigos: `payment_failed` (genérico) e `mbway_not_active_for_phone` (o telemóvel informado não tem MB WAY ativo; `param: phone`; mostre a `message` ao cliente e deixe-o corrigir o número ou usar Multibanco — repetir com o mesmo número dá o mesmo resultado)."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Erro" } } }
+        "409":
+          description: "`external_reference_taken` (referência já usada), `idempotency_key_reused` (mesma Idempotency-Key com corpo diferente) `mbway_temporarily_blocked` (este telemóvel está temporariamente impedido de iniciar pagamentos MB WAY — nada foi criado; traz `retry_after_seconds`, que pode ser de horas; mostre a `message` e ofereça Multibanco) ou `mbway_pending_for_phone` (este telemóvel já tem um pedido MB WAY à espera de confirmação, em qualquer loja — nada foi criado; traz `retry_after_seconds` no corpo e o header `Retry-After`; mostre a `message` ao cliente e reenvie o mesmo pedido depois)."
+          headers:
+            Retry-After:
+              description: "Em `mbway_pending_for_phone` (segundos até o bloqueio cair, no máximo ~300) e em `mbway_temporarily_blocked` (segundos até o número voltar a poder iniciar um pagamento MB WAY — pode ser horas)."
+              schema: { type: integer }
+          content: { application/json: { schema: { $ref: "#/components/schemas/Erro" } } }
+        "413": { $ref: "#/components/responses/Erro413" }
+        "429": { $ref: "#/components/responses/Erro429" }
+    get:
+      tags: [Pedidos]
+      summary: Listar pedidos
+      operationId: listarPedidos
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [pending, awaiting_payment, paid, expired, failed, refunded] }, description: "Valor fora do enum → 400." }
+        - { name: method, in: query, schema: { type: string, enum: [mbway, multibanco] } }
+        - { name: starting_after, in: query, schema: { type: string }, description: "Cursor: o `id` do último pedido da página anterior." }
+      responses:
+        "200":
+          description: Página de até 25 pedidos, do mais novo ao mais antigo.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/PedidoResumo" }
+                  has_more: { type: boolean }
+        "400": { $ref: "#/components/responses/Erro400" }
+        "401": { $ref: "#/components/responses/Erro401" }
+        "429": { $ref: "#/components/responses/Erro429" }
+  /v1/orders/{id}:
+    get:
+      tags: [Pedidos]
+      summary: Consultar pedido
+      operationId: consultarPedido
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string }, example: ord_9f2c1ab34d }
+      responses:
+        "200":
+          description: O pedido.
+          content: { application/json: { schema: { $ref: "#/components/schemas/Pedido" } } }
+        "401": { $ref: "#/components/responses/Erro401" }
+        "404": { $ref: "#/components/responses/Erro404" }
+  /v1/orders/{id}/refunds:
+    post:
+      tags: [Estornos]
+      summary: Estornar pedido
+      operationId: estornarPedido
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 128 }
+          description: Obrigatório. Reenvio com a MESMA chave devolve o estorno original — um retry nunca estorna duas vezes. Para um segundo estorno intencional, use uma chave nova.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                amount: { type: integer, description: "Cêntimos. Omitido ou 0 = estorno TOTAL do valor restante. Parciais são repetíveis até o total." }
+              # corpo é OBRIGATÓRIO: envie {} para estorno total
+                reason: { type: string, description: "Motivo (opcional, uso interno seu)." }
+      responses:
+        "201":
+          description: Estorno executado.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string, example: ref_5ba01cd922 }
+                  amount: { type: integer }
+                  status: { type: string, enum: [succeeded] }
+        "400":
+          description: "`refund_exceeds_amount` (maior que o restante) ou `validation_failed`."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Erro" } } }
+        "401": { $ref: "#/components/responses/Erro401" }
+        "404": { $ref: "#/components/responses/Erro404" }
+        "409":
+          description: "`order_not_paid` — só pedidos pagos podem ser estornados; ou `refund_failed` — a Idempotency-Key já foi usada num estorno que falhou (use uma nova); ou `refund_pending_review` — o estorno foi recebido e está em análise (não reenvie nem troque a chave)."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Erro" } } }
+webhooks:
+  order.paid:
+    post:
+      summary: Pagamento confirmado (evento essencial — Multibanco confirma dias depois)
+      requestBody:
+        content: { application/json: { schema: { $ref: "#/components/schemas/Evento" } } }
+      responses: { "200": { description: "Responda 2xx em até 10 s. Sem 2xx → retries por ~24 h." } }
+  order.awaiting_payment:
+    post: { summary: Voucher Multibanco emitido, responses: { "200": { description: ok } } }
+  order.failed:
+    post: { summary: Pagamento falhou, responses: { "200": { description: ok } } }
+  order.expired:
+    post: { summary: Pedido/voucher expirou, responses: { "200": { description: ok } } }
+  order.refunded:
+    post: { summary: "Estorno TOTAL concluído. Estorno parcial NÃO emite webhook — o pedido segue `paid` e só `amount_refunded` aumenta; para detectá-lo, consulte GET /v1/orders/{id}.", responses: { "200": { description: ok } } }
+components:
+  securitySchemes:
+    chaveSecreta:
+      type: http
+      scheme: bearer
+      description: "Chave secreta do painel (`sk_live_…`). Só no SEU servidor — nunca em browser, app ou repositório."
+  schemas:
+    NovoPedido:
+      type: object
+      required: [amount, method, external_reference, customer]
+      properties:
+        amount: { type: integer, description: "Cêntimos. MB WAY: 50–500000 (€0,50–€5.000). Multibanco: 1–100000000." }
+        currency: { type: string, enum: [EUR], description: "Opcional; apenas EUR." }
+        method: { type: string, enum: [mbway, multibanco] }
+        phone: { type: string, description: "Obrigatório para MB WAY. Telemóvel PT: +3519XXXXXXXX." }
+        external_reference: { type: string, pattern: "^[A-Za-z0-9_\\-\\.]{1,128}$", description: "Seu identificador único do pedido." }
+        description: { type: string, maxLength: 140, description: "Nome do produto/serviço (aparece no seu painel; não é devolvido pela API)." }
+        checkout_url: { type: string, maxLength: 1024, format: uri, description: "Envie SEMPRE — URL http(s) da página de checkout onde a venda ocorreu. Faz parte da integração recomendada. Não é devolvida pela API." }
+        product_type:
+          type: string
+          enum: [digital, physical]
+          default: digital
+          description: "Opcional. Em 'physical' o customer.address passa a ser obrigatório."
+        tracking_parameters:
+          type: object
+          description: "Opcional. Parâmetros de atribuição de campanha (UTMs). Usados pelas integrações de rastreamento configuradas no painel. Chave desconhecida dentro do objeto → 400. Não é devolvido pela API."
+          properties:
+            src: { type: string, maxLength: 500, nullable: true }
+            sck: { type: string, maxLength: 500, nullable: true }
+            utm_source: { type: string, maxLength: 500, nullable: true }
+            utm_campaign: { type: string, maxLength: 500, nullable: true }
+            utm_medium: { type: string, maxLength: 500, nullable: true }
+            utm_content: { type: string, maxLength: 500, nullable: true }
+            utm_term: { type: string, maxLength: 500, nullable: true }
+        customer:
+          type: object
+          description: "Dados do cliente. O e-mail é OBRIGATÓRIO (identifica o cliente no seu cadastro; pedidos do mesmo e-mail viram o mesmo cliente). Armazenados com segurança; nunca devolvidos pela API pública."
+          required: [email]
+          properties:
+            name: { type: string }
+            email: { type: string, description: "Obrigatório. E-mail do cliente." }
+            phone: { type: string }
+            nif: { type: string, description: "NIF PT de 9 dígitos (validado se presente)." }
+            address:
+              type: object
+              description: "Endereço do cliente. Opcional; OBRIGATÓRIO quando product_type=physical. Enviar o objeto exige o mínimo line1+postal_code+city (parcial → 400)."
+              required: [line1, postal_code, city]
+              properties:
+                line1: { type: string, maxLength: 200 }
+                line2: { type: string, maxLength: 120 }
+                postal_code: { type: string, description: "PT: NNNN-NNN; outros países: genérico (≤16)." }
+                city: { type: string, maxLength: 100 }
+                region: { type: string, maxLength: 100 }
+                country: { type: string, description: "ISO-3166-1 alpha-2. Padrão PT." }
+    Pedido:
+      type: object
+      description: "Novos campos podem ser adicionados no futuro — ignore o que não conhecer."
+      properties:
+        object: { type: string, enum: [order], description: "Discriminador do shape (order|payout|dispute nos webhooks)." }
+        id: { type: string, example: ord_9f2c1ab34d }
+        status: { type: string, enum: [pending, awaiting_payment, paid, expired, failed, refunded], description: "Lista fechada. `paid` é o único que libera a entrega; `expired`, `failed` e `refunded` são terminais. Um estorno PARCIAL não muda o status — o pedido continua `paid`." }
+        amount: { type: integer }
+        amount_refunded: { type: integer, description: "Cêntimos já estornados (0 se nenhum). Concilie por `amount - amount_refunded`, nunca só pelo status: um pedido `paid` com este campo > 0 já teve dinheiro devolvido, e o estorno parcial NÃO gera webhook." }
+        currency: { type: string, enum: [EUR] }
+        method: { type: string, enum: [mbway, multibanco] }
+        product_type: { type: string, enum: [digital, physical] }
+        external_reference: { type: string }
+        livemode: { type: boolean }
+        created_at: { type: string, format: date-time }
+        paid_at: { type: string, format: date-time, description: "Presente só quando pago." }
+        multibanco:
+          type: object
+          description: Voucher (apenas method=multibanco). EXIBA entidade, referência e valor ao cliente.
+          properties:
+            entity: { type: string, example: "11249" }
+            reference: { type: string, example: "123 456 789" }
+            amount: { type: integer }
+            expires_at: { type: string, format: date-time }
+    PedidoResumo:
+      type: object
+      description: Item da listagem (shape reduzido — sem `currency` nem `multibanco`).
+      properties:
+        id: { type: string }
+        status: { type: string }
+        amount: { type: integer }
+        method: { type: string }
+        external_reference: { type: string }
+        livemode: { type: boolean }
+        created_at: { type: string, format: date-time }
+        paid_at: { type: string, format: date-time }
+    Payout:
+      type: object
+      description: "Objeto do webhook payout.paid — saque confirmado na sua conta bancária."
+      properties:
+        object: { type: string, enum: [payout] }
+        id: { type: string, example: pay_7d21e93c0a }
+        amount: { type: integer, description: "Cêntimos." }
+        currency: { type: string, enum: [EUR] }
+        status: { type: string, enum: [paid] }
+        requested_at: { type: string, format: date-time }
+        paid_at: { type: string, format: date-time }
+    Disputa:
+      type: object
+      description: "Objeto do webhook dispute.created — contestação aberta pelo pagador. O valor fica retido até a resolução."
+      properties:
+        object: { type: string, enum: [dispute] }
+        id: { type: string, example: dsp_4fa8b12c9e }
+        order: { type: string, description: "Id (ord_…) do pedido contestado.", example: ord_9f2c1ab34d }
+        amount: { type: integer, description: "Cêntimos contestados." }
+        currency: { type: string, enum: [EUR] }
+        reason: { type: string, enum: [fraudulent, product_not_received, product_unacceptable, duplicate, credit_not_processed, subscription_canceled, unrecognized, general, other] }
+        status: { type: string, enum: [needs_response] }
+        evidence_due_by: { type: string, format: date-time, description: "Prazo para enviar evidências (pode ser null)." }
+        created_at: { type: string, format: date-time }
+    Evento:
+      type: object
+      description: "Envelope dos webhooks. Verifique SEMPRE o header `Broski-Signature` (t=<unix>,v1=<hex>; v1 = HMAC-SHA256(secret, t + \".\" + corpo_cru)). Entrega at-least-once, sem ordem garantida — deduplique por `id`. O shape de `data.object` segue `data.object.object` (order|payout|dispute)."
+      properties:
+        id: { type: string, example: evt_ab12cd34ef }
+        type: { type: string, enum: [order.awaiting_payment, order.paid, order.failed, order.expired, order.refunded, payout.paid, dispute.created] }
+        created: { type: integer, description: Unix epoch. }
+        data:
+          type: object
+          properties:
+            object:
+              oneOf:
+                - $ref: "#/components/schemas/Pedido"
+                - $ref: "#/components/schemas/Payout"
+                - $ref: "#/components/schemas/Disputa"
+              discriminator: { propertyName: object }
+    Erro:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            type: { type: string, enum: [invalid_request, authentication_error, payment_error, conflict, not_found, rate_limited, internal_error] }
+            code: { type: string }
+            message: { type: string, description: Mensagem em PT-BR, segura para exibir em logs. }
+            param: { type: string, description: Campo relacionado (quando aplicável). }
+            retry_after_seconds: { type: integer, description: "Em `mbway_pending_for_phone` e `mbway_temporarily_blocked`: segundos até valer a pena reenviar o mesmo pedido." }
+  responses:
+    Erro400: { description: "Requisição inválida (`amount_above_limit` — o valor passa o máximo por pedido definido para a conta; nada é criado; a resposta NÃO informa o valor do limite —, `validation_failed`, `email_required` (falta `customer.email`), `invalid_json`, `invalid_encoding` (corpo não é UTF-8), `currency_not_supported`, `amount_below_fee`, `payment_method_unavailable` — a conta não vende pelo método pedido; nada é criado; ofereça o outro método).", content: { application/json: { schema: { $ref: "#/components/schemas/Erro" } } } }
+    Erro401: { description: "Credenciais inválidas (`unauthorized`).", content: { application/json: { schema: { $ref: "#/components/schemas/Erro" } } } }
+    Erro404: { description: "Não encontrado (`resource_not_found`).", content: { application/json: { schema: { $ref: "#/components/schemas/Erro" } } } }
+    Erro413: { description: "Corpo acima de 64 KB (`body_too_large`).", content: { application/json: { schema: { $ref: "#/components/schemas/Erro" } } } }
+    Erro429: { description: "Acima de 120 req/min por chave (`rate_limited`).", content: { application/json: { schema: { $ref: "#/components/schemas/Erro" } } } }

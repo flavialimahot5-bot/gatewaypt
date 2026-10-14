@@ -1,0 +1,134 @@
+<!doctype html><html lang="pt-BR"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Referência da API — Broski</title>
+<meta name="description" content="Referência completa da API Broski: pedidos MB WAY e Multibanco, estornos, webhooks, erros.">
+<link rel="stylesheet" href="/style.css"></head><body><div class="wrap">
+<nav>
+  <div class="brand"><span class="b">B</span>Broski <small>docs</small></div>
+  <ul>
+    <li><a href="/">← Guias</a></li>
+    <li><a href="/openapi.yaml">openapi.yaml ↓</a></li>
+  </ul>
+  <div class="sec">Endpoints</div>
+  <ul>
+    <li><a href="#criar">POST /v1/orders</a></li>
+    <li><a href="#consultar">GET /v1/orders/{id}</a></li>
+    <li><a href="#listar">GET /v1/orders</a></li>
+    <li><a href="#estornar">POST …/{id}/refunds</a></li>
+  </ul>
+  <div class="sec">Eventos</div>
+  <ul><li><a href="#status">Status de um pedido</a></li><li><a href="#webhooks">Webhooks</a></li><li><a href="#erros">Códigos de erro</a></li></ul>
+</nav>
+<main>
+<h1>Referência da API</h1>
+<p class="top">Base URL <code>https://api.broski.pt</code> · Autenticação <code>Authorization: Bearer sk_live_…</code> · Valores em <strong>cêntimos</strong> · Importe o <a href="/openapi.yaml">openapi.yaml</a> no Postman ou Insomnia.</p>
+
+<h2 id="criar"><span class="pill post">POST</span>/v1/orders — Criar pedido</h2>
+<p>Cria uma cobrança MB WAY ou Multibanco. Header <code>Idempotency-Key</code> <strong>obrigatório</strong> (1–128 caracteres): reenvio com a mesma chave e o mesmo corpo devolve a resposta original com <code>Idempotent-Replay: true</code>; corpo diferente → <code>409</code>. Retenção garantida ≥ 24&nbsp;h.</p>
+<table><tr><th>Campo</th><th>Tipo</th><th>Regras</th></tr>
+<tr><td><code>amount</code></td><td>int</td><td>Obrigatório, em cêntimos. MB WAY: 50–500000 (€0,50–€5.000). Multibanco: 1–100000000.</td></tr>
+<tr><td><code>method</code></td><td>string</td><td>Obrigatório: <code>mbway</code> | <code>multibanco</code>.</td></tr>
+<tr><td><code>phone</code></td><td>string</td><td>Obrigatório p/ MB WAY. Telemóvel PT: <code>+3519XXXXXXXX</code>.</td></tr>
+<tr><td><code>external_reference</code></td><td>string</td><td>Obrigatório, único por conta: <code>A–Z a–z 0–9 _ - .</code> (1–128).</td></tr>
+<tr><td><code>currency</code></td><td>string</td><td>Opcional; apenas <code>EUR</code>.</td></tr>
+<tr><td><code>description</code></td><td>string</td><td>Opcional (≤140). Nome do produto — aparece no seu painel; não é devolvido pela API.</td></tr>
+<tr><td><code>checkout_url</code></td><td>string</td><td><strong>Obrigatório</strong> (≤1024): URL <code>http(s)</code> da página de checkout onde a venda ocorreu — envie sempre. Não é devolvida pela API.</td></tr>
+<tr><td><code>product_type</code></td><td>string</td><td>Opcional: <code>digital</code> (padrão) | <code>physical</code>. Em <code>physical</code> o <code>customer.address</code> passa a ser <strong>obrigatório</strong>.</td></tr>
+<tr><td><code>customer</code></td><td>objeto</td><td><strong>Obrigatório</strong>, por causa do <code>email</code>. <code>email</code> é <strong>obrigatório</strong> e validado — ausente ou mal formado → <code>400 email_required</code>; é a chave do cadastro de clientes (pedidos com o mesmo e-mail são o mesmo cliente). Opcionais: <code>name</code>, <code>phone</code>, <code>nif</code> (9 dígitos, validado se presente), <code>address</code> (objeto, abaixo). Armazenado cifrado; nunca devolvido pela API pública.</td></tr>
+<tr><td><code>customer.address</code></td><td>objeto</td><td>Opcional (obrigatório p/ <code>physical</code>). Campos: <code>line1</code> (obrig.), <code>line2</code> (opc.), <code>postal_code</code> (obrig.; PT: <code>NNNN-NNN</code>), <code>city</code> (obrig.), <code>region</code> (opc.), <code>country</code> (ISO-2, padrão <code>PT</code>). Enviar o objeto exige o mínimo <code>line1+postal_code+city</code>; parcial → <code>400</code>.</td></tr>
+<tr><td><code>tracking_parameters</code></td><td>objeto</td><td>Opcional. Parâmetros de atribuição de campanha (UTMs). Usados pelas integrações de rastreamento configuradas no painel. Campos (todos string, anuláveis, ≤500 caracteres): <code>src</code>, <code>sck</code>, <code>utm_source</code>, <code>utm_campaign</code>, <code>utm_medium</code>, <code>utm_content</code>, <code>utm_term</code>. Chave desconhecida dentro do objeto → <code>400</code>. Não é devolvido pela API.</td></tr></table>
+<p>Campo desconhecido no JSON (inclusive dentro de <code>customer.address</code>) → <code>400 invalid_json</code> (validação estrita).</p>
+<p><strong>O corpo tem de estar em UTF-8</strong> (<code>Content-Type: application/json; charset=utf-8</code>). Byte fora de UTF-8 → <code>400 invalid_encoding</code>, e a requisição é recusada inteira — nada é gravado. Se os dados vierem de sistema legado (Latin-1/CP1252), converta antes de serializar o JSON.</p>
+<details open><summary>Exemplo — MB WAY (201)</summary><div><pre><code>curl https://api.broski.pt/v1/orders \
+  -H "Authorization: Bearer sk_live_..." \
+  -H "Idempotency-Key: pedido-1042-v1" \
+  -H "Content-Type: application/json" \
+  -d '{"amount":1990,"method":"mbway","phone":"+351912345678",
+       "external_reference":"pedido-1042","description":"Curso de tráfego",
+       "checkout_url":"https://sualoja.pt/checkout/curso-de-trafego"}'
+
+{"id":"ord_9f2c1ab34d","status":"pending","amount":1990,"currency":"EUR",
+ "method":"mbway","external_reference":"pedido-1042","livemode":true,
+ "created_at":"2026-07-16T14:03:07Z"}</code></pre>
+<p>O cliente confirma no app MB WAY; a confirmação chega em segundos via webhook <code>order.paid</code>.</p></div></details>
+<details><summary>Exemplo — Multibanco (201, com voucher)</summary><div><pre><code>{"id":"ord_4c77e0b1aa","status":"awaiting_payment","amount":4990,"currency":"EUR",
+ "method":"multibanco","external_reference":"pedido-1043","livemode":true,
+ "created_at":"2026-07-16T14:05:11Z",
+ "multibanco":{"entity":"11249","reference":"123 456 789","amount":4990,
+               "expires_at":"2026-07-19T14:05:11Z"}}</code></pre>
+<p><strong>Exiba entidade, referência e valor ao cliente</strong> — ele paga no homebanking ou numa caixa Multibanco, em geral em até alguns dias. <code>awaiting_payment</code> é um estado normal e duradouro.</p></div></details>
+<p>Erros específicos: <code>402 payment_failed</code> (não iniciou; o pedido é desfeito e a <code>external_reference</code> pode ser reutilizada), <code>402 mbway_not_active_for_phone</code> (o telemóvel não tem MB WAY ativo; o pedido é desfeito; mostre a <code>message</code> e deixe o cliente corrigir o número ou usar Multibanco), <code>409 external_reference_taken</code>, <code>409 mbway_pending_for_phone</code> (o número já tem um pedido MB WAY à espera de confirmação — em qualquer loja; nada é criado; <code>retry_after_seconds</code> + header <code>Retry-After</code>; mostre a <code>message</code> ao cliente e reenvie o mesmo pedido depois), <code>400 amount_below_fee</code>, <code>400 currency_not_supported</code>.</p>
+
+<h2 id="consultar"><span class="pill get">GET</span>/v1/orders/{id} — Consultar pedido</h2>
+<p>Devolve o pedido completo (mesmo shape do POST; <code>paid_at</code> presente quando pago). Pedido inexistente <em>ou de outra conta</em> → <code>404 resource_not_found</code>.</p>
+
+<h2 id="listar"><span class="pill get">GET</span>/v1/orders — Listar pedidos</h2>
+<p>Página de até 25, do mais novo ao mais antigo. Filtros: <code>status</code> (enum de status), <code>method</code>. Paginação por cursor: passe <code>starting_after=&lt;id do último&gt;</code>. Cursor desconhecido é ignorado (devolve a primeira página). Filtro fora do enum → <code>400</code>.</p>
+<pre><code>{"data":[{"id":"ord_…","status":"paid","amount":1990,"method":"mbway",
+  "external_reference":"pedido-1042","livemode":true,
+  "created_at":"…","paid_at":"…"}], "has_more":true}</code></pre>
+<p class="note">O item da listagem é um <strong>resumo</strong> (sem <code>currency</code> nem <code>multibanco</code>). Para o objeto completo, consulte o pedido individual.</p>
+
+<h2 id="estornar"><span class="pill post">POST</span>/v1/orders/{id}/refunds — Estornar</h2>
+<p>Corpo JSON <strong>obrigatório</strong> — envie <code>{}</code> para estorno total do restante, ou <code>{"amount": 500, "reason": "…"}</code> para parcial (amount 0 ou ausente = total). Parciais são repetíveis até o total (o pedido vira <code>refunded</code> só no total acumulado). Header <code>Idempotency-Key</code> <strong>obrigatório</strong> (1–128): reenvio com a mesma chave devolve o estorno original — <strong>um retry nunca estorna duas vezes</strong>. Para um segundo estorno intencional, use uma chave nova.</p>
+<pre><code>201 → {"id":"ref_5ba01cd922","amount":500,"status":"succeeded"}</code></pre>
+<p>Erros: <code>409 order_not_paid</code>, <code>400 refund_exceeds_amount</code>, <code>409 refund_failed</code> (chave já usada num estorno que falhou — use outra), <code>409 refund_pending_review</code> (estorno recebido e em análise — não reenvie), <code>404 resource_not_found</code>.</p>
+
+<h2 id="status">Status de um pedido</h2>
+<p>Lista fechada — não existe outro valor. Status fora desta lista: trate como desconhecido e <strong>não libere nada</strong>.</p>
+<table><tr><th>Status</th><th>Significado</th></tr>
+<tr><td><code>pending</code></td><td>Criado, aguardando o cliente confirmar no app (MB WAY).</td></tr>
+<tr><td><code>awaiting_payment</code></td><td>Voucher emitido, aguardando pagamento (Multibanco). Estado normal e duradouro — pode durar dias.</td></tr>
+<tr><td><code>paid</code></td><td>Pago e confirmado. <strong>Único status que libera a entrega.</strong></td></tr>
+<tr><td><code>expired</code></td><td>Prazo esgotado sem pagamento. Terminal.</td></tr>
+<tr><td><code>failed</code></td><td>Não concluído ou recusado. Terminal.</td></tr>
+<tr><td><code>refunded</code></td><td>Estornado por inteiro. Terminal.</td></tr></table>
+<p class="note"><strong>Estorno parcial não muda o status e não gera webhook.</strong> O pedido continua <code>paid</code> e só <code>amount_refunded</code> aumenta; <code>order.refunded</code> chega apenas quando o estorno atinge o valor total. Concilie sempre por <code>amount - amount_refunded</code>, nunca só pelo status — um pedido <code>paid</code> com <code>amount_refunded &gt; 0</code> já teve dinheiro devolvido. Para detectar um estorno parcial, consulte <code>GET /v1/orders/{id}</code>: ele não chega sozinho.</p>
+
+<h2 id="webhooks">Webhooks</h2>
+<p>Cadastre a URL <strong>HTTPS</strong> no painel (Configurações → Webhooks) — o segredo <code>whbroski_…</code> pode ser consultado quando quiser (Configurações → Webhooks → Ver segredo), e a URL editada sem trocar o segredo. Eventos: <code>order.awaiting_payment</code>, <code>order.paid</code>, <code>order.failed</code>, <code>order.expired</code>, <code>order.refunded</code> (estorno <em>total</em> concluído), <code>payout.paid</code>, <code>dispute.created</code> (lista vazia no cadastro = todos). O endpoint pode receber tipos <em>além</em> destes — responda 2xx e ignore <code>type</code> desconhecido. Campos novos podem surgir nos objetos — ignore o que não conhecer. O shape de <code>data.object</code> segue <code>data.object.object</code>: <code>order</code>, <code>payout</code> ou <code>dispute</code>.</p>
+<pre><code>POST (sua URL)
+Content-Type: application/json
+Broski-Signature: t=1784469809,v1=a3f5b1c92e7d0846…
+
+{"id":"evt_ab12cd34ef","type":"order.paid","created":1784469809,
+ "data":{"object":{"object":"order","id":"ord_9f2c1ab34d","status":"paid",
+   "amount":1990,"amount_refunded":0,"currency":"EUR","method":"mbway",
+   "product_type":"digital","external_reference":"pedido-1042",
+   "livemode":true,"created_at":"…","paid_at":"…"}}}</code></pre>
+<p>Payloads dos demais objetos: <code>payout.paid</code> envia <code>{"object":"payout","id":"pay_…","amount":12345,"currency":"EUR","status":"paid","requested_at":"…","paid_at":"…"}</code>; <code>dispute.created</code> envia <code>{"object":"dispute","id":"dsp_…","order":"ord_…","amount":1990,"currency":"EUR","reason":"fraudulent","status":"needs_response","evidence_due_by":"…","created_at":"…"}</code> (o valor contestado fica retido até a resolução).</p>
+<ul>
+<li><strong>Verifique sempre a assinatura</strong>: <code>v1 = HMAC-SHA256(secret, t + "." + corpo_cru)</code>; rejeite se <code>t</code> divergir do relógio por mais de 5 min (recomendação). Snippets prontos no <a href="/#webhooks">guia</a>.</li>
+<li>Responda <strong>2xx em até 10 s</strong> (processe async se precisar). Redirecionamentos contam como falha.</li>
+<li>Entrega <strong>at-least-once, sem ordem garantida</strong> — deduplique por <code>id</code> do evento e confie no <code>status</code> do objeto.</li>
+<li>Sem 2xx: retries por ~24 h (imediato, 1m, 5m, 15m, 1h, 3h, 8h, 12h) → aí o evento vai à dead-letter, com reenvio manual no painel (log de entregas incluído).</li>
+<li><strong>Log de entregas</strong>: no painel (Configurações → Webhooks → Ver) você acompanha cada tentativa — horário, status HTTP, duração e os <strong>primeiros 2 KB da resposta do seu servidor</strong>, que guardamos por <strong>7 dias</strong> para diagnóstico. O histórico e o reenvio de falhadas valem por 7 dias.</li>
+</ul>
+
+<h2 id="erros">Códigos de erro</h2>
+<p>Toda resposta de erro usa o envelope <code>{"error":{"type","code","message","param?"}}</code> com mensagem em PT-BR.</p>
+<table><tr><th>HTTP</th><th>code</th><th>Quando</th></tr>
+<tr><td>400</td><td><code>validation_failed</code></td><td>Campo inválido (veja <code>param</code> quando presente).</td></tr>
+<tr><td>400</td><td><code>invalid_json</code></td><td>JSON malformado ou campo desconhecido.</td></tr>
+<tr><td>400</td><td><code>currency_not_supported</code></td><td>Moeda diferente de EUR.</td></tr>
+<tr><td>400</td><td><code>amount_below_fee</code></td><td>Valor menor que a tarifa aplicável.</td></tr>
+<tr><td>400</td><td><code>payment_method_unavailable</code></td><td>A conta não vende pelo método pedido (<code>param: "method"</code>). Nada é criado — nem pedido, nem cobrança — e, no MB WAY, o telemóvel não fica bloqueado. Repetir o mesmo pedido dá o mesmo resultado: mostre a <code>message</code> ao cliente e ofereça o outro método. Pode reusar a mesma <code>external_reference</code> com o outro método.</td></tr>
+<tr><td>400</td><td><code>amount_above_limit</code></td><td>O valor passa o máximo por pedido definido para a conta (<code>param: "amount"</code>). Nada é criado. A resposta informa apenas que o limite foi excedido — <strong>não</strong> traz o valor do limite. Mostre a <code>message</code> ao cliente. O titular da conta consulta o limite no painel, em Saldo → Informações úteis.</td></tr>
+<tr><td>400</td><td><code>refund_exceeds_amount</code></td><td>Estorno maior que o restante.</td></tr>
+<tr><td>401</td><td><code>unauthorized</code></td><td>Chave ausente, inválida ou revogada.</td></tr>
+<tr><td>402</td><td><code>payment_failed</code></td><td>O pagamento não pôde ser iniciado.</td></tr>
+<tr><td>402</td><td><code>mbway_not_active_for_phone</code></td><td>O telemóvel informado não tem MB WAY ativo (<code>param: "phone"</code>). O pedido é desfeito. Mostre a <code>message</code> ao cliente e deixe-o corrigir o número ou usar Multibanco; repetir com o mesmo número dá o mesmo resultado.</td></tr>
+<tr><td>404</td><td><code>resource_not_found</code></td><td>Recurso inexistente (ou de outra conta).</td></tr>
+<tr><td>409</td><td><code>external_reference_taken</code></td><td>Referência já usada.</td></tr>
+<tr><td>409</td><td><code>mbway_temporarily_blocked</code></td><td>Este telemóvel está temporariamente impedido de iniciar pagamentos MB WAY. Nada foi criado. Mostre a <code>message</code>, respeite <code>retry_after_seconds</code> (pode ser horas) e ofereça Multibanco.</td></tr>
+<tr><td>409</td><td><code>mbway_pending_for_phone</code></td><td>Este telemóvel já tem um pedido MB WAY à espera de confirmação (bloqueio global, "um telemóvel, um pedido de cada vez"). Nada foi criado. Traz <code>retry_after_seconds</code> e o header <code>Retry-After</code>; a <code>message</code> pode ser mostrada ao cliente.</td></tr>
+<tr><td>409</td><td><code>idempotency_key_reused</code></td><td>Mesma Idempotency-Key com corpo diferente.</td></tr>
+<tr><td>409</td><td><code>order_not_paid</code></td><td>Estorno de pedido não pago.</td></tr>
+<tr><td>409</td><td><code>refund_failed</code></td><td>A Idempotency-Key já foi usada num estorno que falhou. Use uma chave nova.</td></tr>
+<tr><td>409</td><td><code>refund_pending_review</code></td><td>O estorno foi recebido e está em análise pela nossa equipe. Não reenvie nem use outra chave: o resultado será confirmado.</td></tr>
+<tr><td>413</td><td><code>body_too_large</code></td><td>Corpo acima de 64 KB.</td></tr>
+<tr><td>429</td><td><code>rate_limited</code></td><td>Acima de 120 req/min por chave.</td></tr>
+<tr><td>500</td><td><code>internal_error</code></td><td>Erro nosso — tente novamente; persiste? fale com o suporte.</td></tr></table>
+<footer>Broski · <a href="/">Guias</a> · <a href="/openapi.yaml">OpenAPI</a> · <a href="/cdn-cgi/l/email-protection" class="__cf_email__" data-cfemail="a5d6d0d5cad7d1c0e5c7d7cad6cecc8bd5d1">[email&#160;protected]</a></footer>
+</main></div><script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script><script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/v4bc70e2c01a94c73b74392e4234840661791215815920" integrity="sha512-L0ha0OXavK/8okipN9F8BtP84dg9DUhPERbBXzwI6dgTA55d2+yweo3pn5CSFYs45/r8md2+xvUPtTdvTNRfjA==" data-cf-beacon='{"version":"2024.11.0","token":"3925c0bce97d414080bab411f5b5b4bd","r":1,"spa":2}' crossorigin="anonymous"></script>
+</body></html>

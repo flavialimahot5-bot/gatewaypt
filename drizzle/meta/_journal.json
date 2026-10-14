@@ -1,0 +1,90 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1790087370001,
+      "tag": "0000_sticky_psylocke",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1790098988713,
+      "tag": "0001_products",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1790105263834,
+      "tag": "0002_tiktok",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1790113637174,
+      "tag": "0003_push_notifications",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1790115738968,
+      "tag": "0004_checkout_presence",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1790118699712,
+      "tag": "0005_product_upsell",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1790120496753,
+      "tag": "0006_product_type",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1790294281282,
+      "tag": "0007_whatsapp_recovery",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1790317922384,
+      "tag": "0008_plowf_gateway",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1790552727391,
+      "tag": "0009_product_reviews",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1790859400115,
+      "tag": "0010_read_efficiency",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1791157636587,
+      "tag": "0011_broski_notifications",
+      "breakpoints": true
+    }
+  ]
+}

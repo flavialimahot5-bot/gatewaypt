@@ -1,0 +1,17 @@
+import {writeFileSync} from 'node:fs';
+const str={type:'string'};
+const address={type:'object',required:['line1','postal_code','city'],additionalProperties:false,properties:{line1:str,line2:str,postal_code:{type:'string',pattern:'^[0-9]{4}-[0-9]{3}$'},city:str,country:{type:'string',enum:['PT']}}};
+const customer={type:'object',required:['name','email'],additionalProperties:false,properties:{name:str,email:{type:'string',format:'email'},phone:str,nif:str,address}};
+const create={type:'object',required:['attempt','method','customer'],additionalProperties:false,properties:{attempt:{type:'string',format:'uuid'},visit:{type:'string',format:'uuid'},quantity:{type:'integer',minimum:1,maximum:100,default:1},method:{type:'string',enum:['mbway','multibanco']},customer}};
+const parameter=(name)=>({name,in:'path',required:true,schema:str});
+const operation=(summary,parameters=[],schema)=>({summary,parameters,...(schema?{requestBody:{required:true,content:{'application/json':{schema}}}}:{}),responses:{200:{description:'Resposta JSON; contratos completos em README.md'},401:{description:'Não autorizado'},422:{description:'Dados inválidos'}}});
+const paths={};
+paths['/api/pt/products/{product_id}']={post:operation('Criar pelo preço do catálogo. Mesma origem obrigatória.',[parameter('product_id')],create)};
+paths['/api/pt/orders/{id}']={get:operation('Consultar estado local por ID opaco, sem dados pessoais',[parameter('id')])};
+paths['/api/pt/webhook']={post:operation('Webhook com HMAC-SHA256 do corpo bruto',[{name:'Broski-Signature',in:'header',required:true,schema:str}])};
+paths['/api/pt/admin']={get:operation('Configuração e pedidos; login administrativo'),post:operation('Guardar credenciais cifradas; login e mesma origem',[],{type:'object',properties:{token:str,secret:str},additionalProperties:false})};
+paths['/api/pt/provider-orders']={get:operation('Listar Broski; login administrativo',['status','method','starting_after'].map(name=>({name,in:'query',schema:str})))};
+paths['/api/pt/provider-orders/{id}']={get:operation('Consulta pontual Broski; login administrativo',[parameter('id')])};
+paths['/api/pt/refunds/{id}']={post:operation('Reembolso; login e mesma origem. {} total; amount em cêntimos para parcial.',[parameter('id'),{name:'Idempotency-Key',in:'header',required:true,schema:{type:'string',minLength:16,maxLength:128}}],{type:'object',additionalProperties:false,properties:{amount:{type:'integer',minimum:1},reason:{type:'string',maxLength:500}}})};
+writeFileSync('public/api-spec.json',JSON.stringify({openapi:'3.0.3',info:{title:'Goti Pay Portugal',version:'1.0.0',description:'Checkout próprio Broski. Valores em cêntimos EUR; credenciais apenas no servidor. APIs Pix da versão brasileira desativadas.'},paths},null,2)+'\n');
+console.log('OpenAPI Portugal atualizado.');

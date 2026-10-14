@@ -1,0 +1,512 @@
+<!doctype html><html lang="pt-BR"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Documentação — Broski</title>
+<meta name="description" content="Integre pagamentos MB WAY e Multibanco na sua loja com a API Broski. Guia completo: autenticação, primeiro pagamento, webhooks, estornos e erros.">
+<meta property="og:title" content="Broski — Documentação da API">
+<meta property="og:description" content="Pagamentos MB WAY e Multibanco para o seu negócio em Portugal.">
+<link rel="stylesheet" href="/style.css"></head><body><div class="wrap">
+<nav>
+  <div class="brand"><span class="b">B</span>Broski <small>docs</small></div>
+  <ul><li><a href="/referencia.html">Referência da API →</a></li><li><a href="/openapi.yaml">openapi.yaml ↓</a></li></ul>
+  <div class="sec">Guias</div>
+  <ul>
+    <li><a href="#introducao">Introdução</a></li>
+    <li><a href="#prompt-ia">Integre com IA</a></li>
+    <li><a href="#autenticacao">Autenticação</a></li>
+    <li><a href="#primeiro-pagamento">Primeiro pagamento</a></li>
+    <li><a href="#ciclo">Ciclo de vida do pedido</a></li>
+    <li><a href="#idempotencia">Idempotência</a></li>
+    <li><a href="#estornos">Estornos</a></li>
+    <li><a href="#webhooks">Webhooks</a></li>
+    <li><a href="#erros">Erros e limites</a></li>
+    <li><a href="#recebimentos">Recebimentos</a></li>
+    <li><a href="#testes">Ambientes e testes</a></li>
+    <li><a href="#producao">Checklist de produção</a></li>
+    <li><a href="#suporte">Suporte e changelog</a></li>
+  </ul>
+</nav>
+<main>
+<h1>Documentação Broski</h1>
+<p class="top">Receba por <strong>MB WAY</strong> e <strong>Multibanco</strong> no seu negócio em Portugal, com uma API simples em <code>https://api.broski.pt</code>.</p>
+
+<h2 id="introducao">Introdução</h2>
+<p>A integração completa tem 4 passos:</p>
+<ol>
+<li><strong>Ative a sua conta</strong> no painel (<a href="https://app.broski.pt">app.broski.pt</a>) — verificação de dados e documento.</li>
+<li><strong>Gere a sua chave secreta</strong> em Configurações → API.</li>
+<li><strong>Crie pedidos</strong> com <code>POST /v1/orders</code> — MB WAY confirma em segundos; Multibanco emite um voucher pago em até alguns dias.</li>
+<li><strong>Receba webhooks</strong> com a confirmação de cada pagamento e libere o produto/serviço.</li>
+</ol>
+<p>Convenções: valores sempre em <strong>cêntimos</strong> (€19,90 = <code>1990</code>); moeda <code>EUR</code>; respostas JSON com datas RFC&nbsp;3339 (UTC); a API é versionada no path (<code>/v1</code>) e evolui de forma <strong>aditiva</strong> — campos novos podem aparecer, os existentes não mudam de significado.</p>
+
+<h2 id="prompt-ia">Integre com IA — prompt pronto</h2>
+<p>Vai integrar usando um assistente de código (Claude, ChatGPT, Copilot…)? Clique em <strong>Copiar</strong> no canto do bloco e cole junto do seu pedido — ele contém <strong>tudo</strong> que a IA precisa saber sobre a nossa API, incluindo o payload real dos nossos webhooks, sem ela precisar navegar nas docs. Você também pode anexar o <a href="/openapi.yaml">openapi.yaml</a>.</p>
+<div class="promptbox" id="prompt-ia-box"><pre class="promptpre"><code>Integre pagamentos MB WAY e Multibanco no meu checkout usando a API Broski.
+Siga EXATAMENTE esta especificação — não invente campos nem endpoints.
+
+## API Broski (gateway de pagamentos, Portugal, EUR)
+Base URL: https://api.broski.pt
+Autenticação: header "Authorization: Bearer sk_live_..." em toda chamada.
+A chave fica SOMENTE no servidor (variável de ambiente) — nunca em browser,
+app móvel ou repositório. TODA chamada à API parte do SEU backend: a API
+rejeita chamadas de browser (CORS restrito, de propósito) — não existe
+NENHUMA chamada client-side, nem para consultar status.
+Valores sempre em CÊNTIMOS (número JSON inteiro): €19,90 = 1990 — nunca
+string ("1990") nem decimal (19.90). Moeda única: EUR.
+Envie SOMENTE os campos documentados — campo desconhecido causa 400.
+Envie o corpo SEMPRE em UTF-8, com "Content-Type: application/json;
+charset=utf-8". Byte fora de UTF-8 responde 400 invalid_encoding e a
+requisição é recusada inteira — nada é gravado. Se os dados vierem de
+sistema legado (Latin-1/CP1252), converta ANTES de serializar o JSON:
+acentos mal codificados não são recusados por acaso, são recusados sempre.
+
+FLUXO 100% SERVER-SIDE: NÃO existe SDK JavaScript, biblioteca de cliente,
+client_secret, publishable key, iframe/Elements, página de pagamento
+hospedada, modal, nem redirect. NÃO carregue nenhum script de terceiros no
+checkout. O SEU backend chama a API REST e o SEU checkout renderiza a
+resposta JSON (instruções MB WAY ou voucher Multibanco). A única credencial
+é a sk_live_ do servidor.
+
+## Fluxo ponta-a-ponta (siga esta sequência)
+1. Browser envia o carrinho ao SEU servidor.
+2. SEU servidor calcula o amount (nunca confie no browser) e faz o
+   POST /v1/orders.
+3. SEU servidor devolve ao browser SÓ o necessário: {id, status, multibanco?}.
+4. Checkout renderiza: MB WAY → tela de espera; Multibanco → voucher.
+5. Webhook order.paid chega ao SEU servidor → atualiza o pedido → libera.
+6. O browser acompanha consultando O SEU servidor (nunca a API Broski).
+
+## Criar pedido — POST /v1/orders
+Headers: Authorization, Content-Type: application/json e
+Idempotency-Key (OBRIGATÓRIO, 1–128 chars — derive do id do pedido da loja,
+ex.: "pedido-1042-v1"). Reenvio com a mesma chave e mesmo corpo devolve a
+resposta original (header Idempotent-Replay: true); mesma chave com corpo
+diferente responde 409 idempotency_key_reused.
+A chave identifica UMA tentativa com UM corpo exato: se QUALQUER campo mudar
+(valor, método, telefone), gere chave nova incrementando o sufixo
+("pedido-1042-v2"). Reuse a mesma chave SOMENTE para reenviar a MESMA
+requisição após timeout/erro de rede.
+
+Corpo (JSON):
+- amount      int    obrigatório. MB WAY: 50–500000 (€0,50–€5.000).
+                     Multibanco: 1–100000000 (na prática o mínimo é a
+                     tarifa da conta — abaixo → 400 amount_below_fee).
+                     Cada conta tem um VALOR MÁXIMO POR PEDIDO, definido
+                     para a conta; acima → 400 amount_above_limit.
+- currency    string opcional; se enviar, exatamente "EUR" (maiúsculo).
+                     Recomendado: omitir.
+- method      string obrigatório: "mbway" | "multibanco".
+- phone       string obrigatório se mbway. Telemóvel PT "+3519XXXXXXXX"
+                     (2º dígito 1/2/3/6). Normalize no SEU servidor: remova
+                     espaços e prefixe +351 se o cliente digitar só os 9
+                     dígitos. Espaços são tolerados.
+- external_reference string obrigatório, ÚNICO por conta (A-Za-z0-9_-. até
+                     128). Duplicado responde 409 external_reference_taken.
+- description string opcional (≤140) — nome do produto (aparece no painel
+                     do lojista; não volta nas respostas da API).
+- checkout_url string OBRIGATÓRIO (≤1024) — URL http(s) da página de checkout
+                     onde a venda ocorreu. SEMPRE envie. Fica registrada no
+                     pedido (uso interno); não volta nas respostas da API.
+- product_type string opcional: "digital" (padrão) | "physical". Em
+                     "physical" o customer.address vira OBRIGATÓRIO.
+- customer    objeto OBRIGATÓRIO: {name, email, phone, nif, address}.
+                     customer.email é OBRIGATÓRIO e validado: ausente ou
+                     mal formado responde 400 email_required. É a chave do
+                     cadastro de clientes — pedidos com o mesmo e-mail são o
+                     mesmo cliente. name, phone e nif são opcionais.
+                     Armazenado cifrado; o endereço só aparece no painel do
+                     lojista (nunca na API pública).
+- customer.address objeto opcional (OBRIGATÓRIO se product_type=physical):
+                     {line1 (obrig.), line2 (opc.), postal_code (obrig.; PT
+                     NNNN-NNN), city (obrig.), region (opc.), country (ISO-2,
+                     padrão PT)}. Enviar o objeto exige line1+postal_code+city;
+                     parcial → 400.
+
+Resposta 201 (MB WAY):
+{"id":"ord_...","status":"pending","amount":1990,"currency":"EUR",
+ "method":"mbway","product_type":"digital","external_reference":"...",
+ "livemode":true,"created_at":"RFC3339"}
+O cliente aprova no app MB WAY; a confirmação chega EM SEGUNDOS via webhook.
+A resposta MB WAY NÃO tem campo de prazo: a janela de aprovação é curta
+(poucos minutos); o desfecho não-pago chega como order.failed OU
+order.expired — trate os dois como terminal não-pago idênticos.
+
+## Espera do MB WAY no checkout (padrão OBRIGATÓRIO)
+Após o 201, mostre "Confirme o pagamento no app MB WAY do seu telemóvel"
+com indicador de espera. O browser consulta O SEU servidor (polling de um
+endpoint SEU a cada 2–3 s, ou SSE/WebSocket), e o seu servidor responde com
+o status que recebeu do webhook. NUNCA faça polling do GET /v1/orders/{id}
+da Broski por checkout — o limite de 120 req/min é por chave, GLOBAL
+(compartilhado com a criação de pedidos): meia dúzia de clientes em espera
+derrubaria a loja inteira em 429. Use o GET no máximo como fallback pontual
+(1 consulta se o webhook não chegou em ~60 s). Timeout de UX: após ~5 min
+sem confirmação, ou ao receber order.failed/order.expired, mostre "pagamento
+não confirmado" + botão de tentar de novo (ver regras de retry abaixo).
+
+Resposta 201 (Multibanco):
+{... "status":"awaiting_payment",
+ "multibanco":{"entity":"11249","reference":"123 456 789",
+               "amount":4990,"expires_at":"RFC3339"}}
+REGRAS MULTIBANCO: exiba entidade, referência, valor e prazo (expires_at —
+não assuma um número fixo de dias) ao cliente. "awaiting_payment" é estado
+NORMAL e duradouro — não trate como erro nem crie pedido novo. O checkout
+NÃO espera o pagamento: mostre o voucher numa tela FINAL ("guarde estes
+dados"), envie-o também por email da SUA loja (a Broski não envia email ao
+cliente final) e ENCERRE o fluxo — sem spinner, sem polling. A confirmação
+chega em horas/dias via order.paid; só então libere o produto. Passado o
+expires_at, esconda o voucher e ofereça gerar novo pedido (o order.expired
+pode chegar com atraso em relação ao expires_at).
+
+Erros possíveis: 400 validation_failed | invalid_json |
+currency_not_supported | amount_below_fee | amount_above_limit
+(ver "Limite por pedido" abaixo) | payment_method_unavailable (ver
+"Método indisponível" abaixo); 401 unauthorized;
+402 payment_failed (pedido desfeito — pode reusar a external_reference);
+402 mbway_not_active_for_phone (o número informado não tem MB WAY ativo —
+pedido desfeito; ver "Número sem MB WAY" abaixo);
+409 (acima); 409 mbway_pending_for_phone e 409 mbway_temporarily_blocked
+(ver "Bloqueio por telemóvel" abaixo — em ambos NADA foi criado; pode
+reenviar a MESMA external_reference e Idempotency-Key depois);
+413 body_too_large (&gt;64KB); 429 rate_limited
+(120 req/min por chave, global — implemente backoff exponencial; o 429 NÃO
+traz Retry-After; os dois 409 de telemóvel trazem).
+Envelope de erro:
+{"error":{"type","code","message","param?","retry_after_seconds?"}}
+(message em PT-BR, escrita para poder ser mostrada ao cliente final).
+
+## Método indisponível
+Uma conta pode não ter um dos métodos de pagamento disponível. Um pedido por
+esse método é recusado antes de qualquer cobrança:
+  HTTP 400  {"error":{"type":"invalid_request","code":"payment_method_unavailable",
+   "param":"method",
+   "message":"Este método de pagamento não está disponível. Escolha outro método de pagamento."}}
+Nada foi criado (nem pedido, nem cobrança) e, no MB WAY, o telemóvel não fica
+bloqueado. Repetir o MESMO pedido dá o mesmo resultado: ofereça o outro método
+ao cliente. Pode reusar a mesma external_reference com o outro método.
+
+## Limite por pedido
+Cada conta tem um valor máximo por pedido. Um pedido acima dele é recusado
+antes de qualquer cobrança:
+  HTTP 400  {"error":{"type":"invalid_request","code":"amount_above_limit",
+   "param":"amount",
+   "message":"O valor deste pedido excede o limite permitido."}}
+A resposta diz APENAS que o valor passou do limite — ela NÃO informa qual é o
+limite. O titular da conta consulta o valor no painel, em Saldo →
+"Informações úteis".
+O que fazer no seu checkout:
+  - MOSTRE a "message" tal e qual ao cliente e deixe-o reduzir o pedido.
+    Não invente um valor de limite na mensagem: a API não o envia.
+  - Nada foi criado: ao reenviar com um valor menor pode reusar a MESMA
+    external_reference.
+  - Se quiser validar o carrinho antes de enviar, peça o valor ao titular da
+    conta (ele vê no painel) e guarde-o como CONFIGURAÇÃO da integração —
+    nunca fixo no código, porque pode ser alterado para a conta.
+  - Não divida a compra em vários pedidos por conta própria para contornar o
+    limite, e não faça retry automático: o resultado é o mesmo.
+  - Para aumentar o limite, o titular da conta fala com o suporte.
+
+## Número sem MB WAY
+Se o telemóvel informado não tiver MB WAY ativo, a criação devolve:
+  HTTP 402  {"error":{"type":"payment_error",
+   "code":"mbway_not_active_for_phone","param":"phone",
+   "message":"Este número de telemóvel não tem MB WAY ativo. Confira o número
+   ou use outro método de pagamento."}}
+O que fazer no seu checkout:
+  - MOSTRE a "message" tal e qual ao cliente, junto ao campo do telemóvel.
+  - Deixe-o CORRIGIR o número ou escolher Multibanco. Mantenha o resto do
+    formulário preenchido.
+  - NÃO reenvie o mesmo pedido com o mesmo número: o resultado é o mesmo.
+    Não é falha temporária nem indisponibilidade — não faça retry automático.
+  - O pedido foi desfeito: quando o cliente corrigir, pode reusar a MESMA
+    external_reference e Idempotency-Key.
+  - Não é possível saber de antemão se um número tem MB WAY; trate este erro
+    como parte normal do fluxo, não como exceção.
+
+## Bloqueio por telemóvel (MB WAY) — "um telemóvel, um pedido de cada vez"
+Enquanto um pedido MB WAY está à espera de confirmação no app do cliente,
+o MESMO número de telemóvel não consegue iniciar outro pedido MB WAY — em
+NENHUMA loja da Broski (o bloqueio é global). A tentativa devolve:
+  HTTP 409  {"error":{"type":"conflict","code":"mbway_pending_for_phone",
+   "message":"Já existe um pagamento MB WAY à espera de confirmação para este
+   número de telemóvel. Abra o app MB WAY e confirme (ou recuse) esse
+   pagamento antes de iniciar outro. Se preferir, aguarde 4 minutos e tente
+   de novo.","retry_after_seconds":240}}   + header Retry-After: 240
+Há um SEGUNDO código, para um número temporariamente impedido de iniciar
+pagamentos MB WAY (não há nenhum pagamento à espera de confirmação):
+  HTTP 409  {"error":{"type":"conflict","code":"mbway_temporarily_blocked",
+   "message":"Não é possível iniciar um pagamento MB WAY com este número de
+   telemóvel neste momento. Tente novamente mais tarde ou use outro método de
+   pagamento.","retry_after_seconds":10800}}  + header Retry-After: 10800
+Trate os dois da MESMA forma; muda só o texto (que vem pronto) e o tempo de
+espera, que pode ser de horas — por isso ofereça Multibanco como alternativa.
+O que fazer no seu checkout:
+  - MOSTRE a "message" tal e qual ao cliente (já está escrita para ele);
+    NÃO trate como falha do pagamento nem crie outro pedido.
+  - O bloqueio cai no instante em que o cliente confirma ou recusa o push
+    no app (ou expira, no máximo em ~5 min). Pode reenviar EXATAMENTE o
+    mesmo POST (mesma external_reference e Idempotency-Key) depois de
+    retry_after_seconds — nada foi criado da primeira vez.
+  - Se o cliente pagou o pedido anterior, ele vai receber o order.paid
+    desse pedido; não abra um novo.
+Só MB WAY tem este bloqueio (Multibanco não).
+
+## Consultar — GET /v1/orders/{id}    (404 resource_not_found se não existir)
+## Listar — GET /v1/orders?status=&method=&starting_after=<id>  (25/página,
+   {"data":[resumo...],"has_more":bool})
+## Estornar — POST /v1/orders/{id}/refunds
+   Corpo JSON OBRIGATÓRIO: {} = estorno total do restante;
+   {"amount":int,"reason"?:str} = parcial (amount 0 ou ausente = total).
+   Header Idempotency-Key OBRIGATÓRIO (1–128): reenvio com a MESMA chave
+   devolve o estorno original — um retry NUNCA estorna duas vezes. Para um
+   segundo estorno intencional, use uma chave NOVA.
+   201 {"id":"ref_...","amount":n,"status":"succeeded"}.
+   Erros: 409 order_not_paid; 400 refund_exceeds_amount;
+   409 refund_failed (a chave já foi usada num estorno que falhou — use outra);
+   409 refund_pending_review (o estorno foi recebido e está em análise — NÃO
+   reenvie nem troque a chave: o resultado será confirmado).
+
+## Status de um pedido (lista fechada)
+pending          criado, aguardando o cliente confirmar (MB WAY).
+awaiting_payment voucher emitido, aguardando pagamento (Multibanco).
+                 Estado normal e duradouro — pode durar dias.
+paid             pago e confirmado. ÚNICO status que libera a entrega.
+expired          prazo esgotado sem pagamento. Terminal.
+failed           não concluído ou recusado. Terminal.
+refunded         estornado por INTEIRO. Terminal.
+Não existe outro valor. Status fora desta lista: trate como desconhecido e
+NÃO libere nada.
+
+ESTORNO PARCIAL NÃO MUDA O STATUS E NÃO GERA WEBHOOK. O pedido continua
+"paid" e só amount_refunded aumenta; order.refunded chega apenas quando o
+estorno atinge o valor total. Concilie SEMPRE por amount - amount_refunded,
+nunca só pelo status — um pedido "paid" com amount_refunded > 0 já teve
+dinheiro devolvido. Para detectar estorno parcial, consulte
+GET /v1/orders/{id}; ele não chega sozinho.
+
+## Webhooks (OBRIGATÓRIO implementar — Multibanco confirma dias depois)
+O lojista cadastra a URL HTTPS no painel Broski (Configurações → Webhooks) e
+guarda o segredo "whbroski_..." (consultável depois em Configurações →
+Webhooks → Ver segredo). Implemente um endpoint POST público que:
+1. Lê o corpo CRU (bytes, antes de parsear JSON).
+2. Verifica o header "Broski-Signature: t=&lt;unix&gt;,v1=&lt;hex&gt;" assim:
+   esperado = HMAC-SHA256(secret, t + "." + corpo_cru) em hex;
+   compare com v1 em TEMPO CONSTANTE; rejeite se |agora - t| > 300s.
+   VETOR DE TESTE (sua implementação deve reproduzir):
+   secret: whbroski_vetor_de_teste_nao_usar_em_producao
+   t: 1750000000
+   corpo: {"id":"evt_teste123","type":"order.paid","created":1750000000,"data":{"object":{"id":"ord_teste123","status":"paid"}}}
+   header esperado: t=1750000000,v1=5fb448226598b14dea45ff94ee317c2c1edd464f87cd720b0d8673ea89731d4c
+3. Responde 2xx em até 10s (processe assíncrono se precisar).
+4. Deduplica pelo "id" do evento (entrega at-least-once, SEM ordem
+   garantida) e confia no "status" do objeto, não no tipo do evento.
+
+Envelope do evento (exemplo REAL de order.paid, MB WAY — ILUSTRATIVO, não
+assinado; a ordem das chaves no JSON não é significativa, não parseie por
+posição; para validar sua verificação use o VETOR DE TESTE acima):
+{"id":"evt_7Kq2p9mXvA","type":"order.paid","created":1784469809,
+ "data":{"object":{"object":"order","id":"ord_9f2c1ab34d","status":"paid",
+   "amount":1990,"amount_refunded":0,"currency":"EUR","method":"mbway",
+   "product_type":"digital","external_reference":"pedido-1042",
+   "livemode":true,"created_at":"2026-07-19T14:03:11Z",
+   "paid_at":"2026-07-19T14:03:29Z"}}}
+data.object é o MESMO objeto do GET /v1/orders/{id} (inclui product_type e
+amount_refunded; paid_at quando pago; multibanco quando há voucher).
+Eventos: order.awaiting_payment, order.paid, order.failed, order.expired,
+order.refunded (estorno TOTAL), payout.paid, dispute.created. O shape de
+data.object segue data.object.object ("order" | "payout" | "dispute"):
+- payout.paid  → {"object":"payout","id":"pay_...","amount":48000,
+    "currency":"EUR","status":"paid","requested_at":"RFC3339","paid_at":"RFC3339"}
+- dispute.created → {"object":"dispute","id":"dsp_...","order":"ord_...",
+    "amount":1990,"currency":"EUR","reason":"...","status":"needs_response",
+    "evidence_due_by":"RFC3339","created_at":"RFC3339"}
+Seu endpoint pode receber tipos ALÉM destes — responda 2xx e ignore
+qualquer type que não tratar; NUNCA falhe por tipo desconhecido;
+ignore campos que não conhecer (novos podem surgir).
+Webhooks são emitidos APENAS para pagamentos reais (livemode) — pagamentos
+de teste não disparam webhook; teste o handler com o exemplo assinado acima.
+Sem 2xx: retries por ~24h, depois dead-letter (reenvio manual no painel).
+Redirecionamentos (3xx) contam como falha — cadastre a URL FINAL exata
+(com/sem www importa); a URL pode ser editada no painel sem trocar o segredo.
+
+## Regras de negócio INEGOCIÁVEIS
+1. Libere o produto/serviço SOMENTE ao receber order.paid (nunca na criação
+   do pedido, nunca confiando no browser do cliente).
+2. O valor cobrado vem do SEU servidor — nunca aceite amount do cliente.
+3. Trate order.failed/order.expired com mensagem clara e botão de tentar
+   de novo. NOVA tentativa após failed/expired = pedido NOVO: gere
+   external_reference NOVA (ex.: "pedido-1042-t2" — a anterior fica ocupada
+   para sempre) E Idempotency-Key NOVA (ex.: "pedido-1042-v2"). Repetir a
+   mesma chave devolve o pedido antigo já morto (replay), não cria outro.
+   EXCEÇÃO: após um 402 (payment_failed ou mbway_not_active_for_phone) pode
+   reusar a MESMA referência e chave (o pedido é desfeito).
+4. Guarde o "id" (ord_...) retornado e associe ao pedido da sua loja.
+5. Não há endpoint de webhook via API — o cadastro é no painel.
+6. Os 409 de telemóvel NÃO são erro de pagamento e NUNCA se resolvem
+   repetindo o pedido:
+   - mbway_pending_for_phone: o cliente já tem um push MB WAY vivo (aqui ou
+     noutra loja). Mostre a message e deixe-o decidir no app.
+   - mbway_temporarily_blocked: o número está temporariamente impedido.
+     Mostre a message, respeite retry_after_seconds (pode ser horas) e
+     ofereça Multibanco.
+   Em ambos: nada foi criado, não mude o telemóvel por sua conta e nunca
+   crie outro pedido para "forçar".
+7. 402 mbway_not_active_for_phone: o número não tem MB WAY. Mostre a message
+   no campo do telemóvel e deixe o cliente corrigir ou usar Multibanco.
+   Nunca repita o pedido com o mesmo número.
+8. 400 amount_above_limit: o total passa o valor máximo por pedido da conta.
+   A resposta NÃO traz o valor do limite — mostre a message tal e qual, sem
+   acrescentar números. Nunca parta a compra em vários pedidos nem repita a
+   tentativa.
+9. 400 payment_method_unavailable: a conta não vende por esse método. Mostre
+   a message e ofereça o OUTRO método (mbway ↔ multibanco). Nunca repita o
+   pedido com o mesmo método, e não trate como falha temporária.
+
+## Ícones dos métodos no checkout (use estes, não invente)
+Logotipos oficiais, sobre fundo CLARO. MB WAY é horizontal, Multibanco é
+vertical — use alturas diferentes para equilíbrio visual:
+&lt;img src="https://docs.broski.pt/assets/mbway.svg" alt="MB WAY" height="28"&gt;
+&lt;img src="https://docs.broski.pt/assets/multibanco.svg" alt="Multibanco" height="40"&gt;
+Documentação completa: https://docs.broski.pt</code></pre></div>
+<p class="note ok-note">Clique em <strong>Copiar</strong> (canto superior direito do bloco) — ou <strong>Expandir</strong> e selecione manualmente (Ctrl/Cmd+A dentro do bloco → Ctrl/Cmd+C). O prompt é autossuficiente: payloads, respostas, o <strong>envelope real</strong> dos nossos webhooks, o vetor de teste da assinatura e as regras de segurança.</p>
+
+<h2 id="autenticacao">Autenticação</h2>
+<p>A API é <strong>exclusivamente servidor→servidor</strong>: chamadas de browser são bloqueadas por CORS de propósito — além de nunca expor a chave, nem consulta de status é client-side. Toda chamada leva <code>Authorization: Bearer sk_live_…</code>. A chave é criada no painel (até 10 ativas por conta — use uma por sistema e dê nomes: "Loja", "ERP"), exibida <strong>uma única vez</strong>, e pode ser revogada a qualquer momento.</p>
+<div class="note"><strong>Nunca</strong> use a chave no navegador, em apps móveis ou em repositórios. Ela pertence ao seu servidor. Chave exposta? Revogue no painel e gere outra — efeito imediato.</div>
+
+<h2 id="primeiro-pagamento">Primeiro pagamento</h2>
+<h3>MB WAY — confirmação em segundos</h3>
+<pre><code>curl https://api.broski.pt/v1/orders \
+  -H "Authorization: Bearer sk_live_..." \
+  -H "Idempotency-Key: pedido-1042-v1" \
+  -H "Content-Type: application/json" \
+  -d '{"amount":1990,"method":"mbway","phone":"+351912345678",
+       "external_reference":"pedido-1042","description":"Curso de tráfego",
+       "checkout_url":"https://sualoja.pt/checkout/curso-de-trafego",
+       "customer":{"name":"Ana Cliente","email":"<a href="/cdn-cgi/l/email-protection" class="__cf_email__" data-cfemail="4a2b242b0a2f322f273a2625643a3e">[email&#160;protected]</a>"}}'</code></pre>
+<p>Resposta <code>201</code> com <code>"status":"pending"</code>: o cliente recebe a notificação no app MB WAY e aprova. Em segundos chega o webhook <code>order.paid</code> (ou <code>order.failed</code>/<code>order.expired</code>). Limites MB WAY: €0,50 a €5.000 por pedido; telemóvel PT (<code>+3519…</code>) obrigatório.</p>
+<h3>Multibanco — voucher pago em dias</h3>
+<p>Mesma chamada com <code>"method":"multibanco"</code> (sem <code>phone</code>). A resposta <code>201</code> já vem <code>"status":"awaiting_payment"</code> com o voucher:</p>
+<pre><code>"multibanco":{"entity":"11249","reference":"123 456 789",
+              "amount":4990,"expires_at":"2026-07-19T14:05:11Z"}</code></pre>
+<div class="note ok-note"><strong>Seu dever de exibição:</strong> mostre <em>entidade, referência e valor</em> ao cliente (e o prazo). Ele paga no homebanking ou numa caixa Multibanco. <code>awaiting_payment</code> é um estado <em>normal</em> que pode durar dias — a confirmação chega pelo webhook <code>order.paid</code>. Não trate como erro nem crie um pedido novo.</div>
+
+<h3>Ícones para o seu checkout</h3>
+<p>Hospedamos os ícones dos métodos — use direto no seu checkout (SVG, cache imutável):</p>
+<p><img src="/assets/mbway.svg" alt="MB WAY" height="36" class="mimg"><img src="/assets/multibanco.svg" alt="Multibanco" height="52" class="mimg"></p>
+<pre><code>&lt;!-- MB WAY é horizontal; Multibanco é vertical (marca + texto embaixo) —
+     alturas diferentes para equilíbrio visual. Use sobre fundo CLARO. --&gt;
+&lt;img src="https://docs.broski.pt/assets/mbway.svg" alt="MB WAY" height="28"&gt;
+&lt;img src="https://docs.broski.pt/assets/multibanco.svg" alt="Multibanco" height="40"&gt;</code></pre>
+<p>São os logotipos vetoriais oficiais das marcas MB WAY e Multibanco, ~2&nbsp;KB cada com cache de 24&nbsp;h — pode referenciar direto do seu checkout.</p>
+
+<h2 id="ciclo">Ciclo de vida do pedido</h2>
+<table><tr><th>Método</th><th>Transições</th></tr>
+<tr><td>MB WAY</td><td><code>pending</code> → <code>paid</code> · <code>failed</code> · <code>expired</code></td></tr>
+<tr><td>Multibanco</td><td><code>awaiting_payment</code> → <code>paid</code> · <code>failed</code> · <code>expired</code> (voucher venceu)</td></tr>
+<tr><td>Qualquer</td><td><code>paid</code> → <code>refunded</code> (somente no estorno <em>total</em>)</td></tr></table>
+<p>Os estados finais não regridem. Um evento duplicado nunca re-transiciona um pedido.</p>
+
+<h2 id="idempotencia">Idempotência</h2>
+<p>O header <code>Idempotency-Key</code> é <strong>obrigatório</strong> na criação de pedidos e é a sua proteção contra cobrança dupla em timeouts/reenvios:</p>
+<ul>
+<li>Mesma chave + mesmo corpo → devolve a resposta original (header <code>Idempotent-Replay: true</code>), sem criar nada.</li>
+<li>Mesma chave + corpo diferente → <code>409 idempotency_key_reused</code>. A chave identifica <em>uma tentativa com um corpo exato</em>: mudou o valor/método/telefone? Gere chave nova ("pedido-1042-v2").</li>
+<li><strong>Retry após <code>failed</code>/<code>expired</code></strong>: é pedido NOVO — <code>external_reference</code> nova (a antiga fica ocupada) E chave nova. Repetir a mesma chave devolve o pedido morto via replay. Exceção: após <code>402</code> pode reusar ambas.</li>
+<li>Só o <em>sucesso</em> fica gravado: se a criação falhou, pode reusar a mesma chave no retry. Retenção garantida: ≥ 24&nbsp;h.</li>
+</ul>
+<p>Use uma chave derivada do seu pedido (ex.: <code>pedido-1042-v1</code>). A <code>external_reference</code> é uma segunda barreira: é única por conta (<code>409 external_reference_taken</code>).</p>
+
+<h2 id="estornos">Estornos</h2>
+<pre><code>curl https://api.broski.pt/v1/orders/ord_9f2c1ab34d/refunds \
+  -H "Authorization: Bearer sk_live_..." -H "Content-Type: application/json" \
+  -H "Idempotency-Key: estorno-1042-v1" \
+  -d '{"amount":500,"reason":"troca"}'   # omita amount p/ estorno total</code></pre>
+<p>O corpo JSON é <strong>obrigatório</strong>: envie <code>{}</code> para estorno total do restante. O header <code>Idempotency-Key</code> (1–128) é <strong>obrigatório</strong> e é a sua proteção contra estorno duplo: um reenvio com a <strong>mesma chave</strong> (após timeout, fila que reprocessa, duplo-clique) devolve o estorno original em vez de estornar de novo. Para um segundo estorno intencional, use uma chave <strong>nova</strong>. Só pedidos <code>paid</code> podem ser estornados (<code>409 order_not_paid</code>); parciais são repetíveis até o total (<code>400 refund_exceeds_amount</code> acima disso). No estorno total o pedido vira <code>refunded</code> e o webhook <code>order.refunded</code> é emitido. O valor devolvido ao cliente segue o caminho do método original.</p>
+
+<h2 id="webhooks">Webhooks</h2>
+<p>Essenciais no Multibanco (o pagamento chega dias depois). Cadastre a URL <strong>HTTPS</strong> no painel (Configurações → Webhooks) e guarde o segredo <code>whbroski_…</code> (também consultável depois em “Ver segredo”). Política de retries na <a href="/referencia.html#webhooks">referência</a>.</p>
+<p>O corpo é um envelope <code>{id, type, created, data.object}</code> — <code>data.object</code> é o mesmo objeto do <code>GET</code>. Exemplo real de <code>order.paid</code> (<em>ilustrativo, não assinado</em>; a ordem das chaves não importa):</p>
+<pre><code>{"id":"evt_7Kq2p9mXvA","type":"order.paid","created":1784469809,
+ "data":{"object":{"object":"order","id":"ord_9f2c1ab34d","status":"paid",
+   "amount":1990,"amount_refunded":0,"currency":"EUR","method":"mbway",
+   "product_type":"digital","external_reference":"pedido-1042",
+   "livemode":true,"created_at":"2026-07-19T14:03:11Z",
+   "paid_at":"2026-07-19T14:03:29Z"}}}</code></pre>
+<p><code>payout.paid</code> traz <code>data.object.object:"payout"</code> e <code>dispute.created</code> traz <code>"dispute"</code> — shapes completos na <a href="/referencia.html#webhooks">referência</a>.</p>
+<h3>Verificando a assinatura</h3>
+<p>Header <code>Broski-Signature: t=&lt;unix&gt;,v1=&lt;hex&gt;</code>, onde <code>v1 = HMAC-SHA256(secret, t + "." + corpo_cru)</code>. Use o corpo <em>cru</em> (antes de parsear o JSON) e comparação em tempo constante; rejeite <code>t</code> a mais de 5 min do seu relógio.</p>
+<details open><summary>Node.js</summary><div><pre><code>const crypto = require("crypto");
+function verificar(sigHeader, corpoCru, secret) {
+  const m = /^t=(\d+),v1=([0-9a-f]{64})$/.exec(sigHeader || "");
+  if (!m) return false;
+  const [_, t, v1] = m;
+  if (Math.abs(Date.now()/1000 - Number(t)) > 300) return false;
+  const esperado = crypto.createHmac("sha256", secret)
+    .update(t + "." + corpoCru).digest("hex");
+  return crypto.timingSafeEqual(Buffer.from(v1), Buffer.from(esperado));
+}</code></pre></div></details>
+<details><summary>PHP</summary><div><pre><code>function verificar(string $sig, string $corpoCru, string $secret): bool {
+  if (!preg_match('/^t=(\d+),v1=([0-9a-f]{64})$/', $sig, $m)) return false;
+  if (abs(time() - (int)$m[1]) > 300) return false;
+  $esperado = hash_hmac('sha256', $m[1] . '.' . $corpoCru, $secret);
+  return hash_equals($esperado, $m[2]);
+}</code></pre></div></details>
+<details><summary>Python</summary><div><pre><code>import hmac, hashlib, time, re
+def verificar(sig: str, corpo_cru: bytes, secret: str) -> bool:
+    m = re.fullmatch(r"t=(\d+),v1=([0-9a-f]{64})", sig or "")
+    if not m or abs(time.time() - int(m[1])) > 300: return False
+    esperado = hmac.new(secret.encode(), f"{m[1]}.".encode() + corpo_cru,
+                        hashlib.sha256).hexdigest()
+    return hmac.compare_digest(esperado, m[2])</code></pre></div></details>
+<h3>Vetor de teste</h3>
+<p>Sua implementação deve reproduzir exatamente este resultado:</p>
+<pre><code>secret : whbroski_vetor_de_teste_nao_usar_em_producao
+t      : 1750000000
+corpo  : {"id":"evt_teste123","type":"order.paid","created":1750000000,"data":{"object":{"id":"ord_teste123","status":"paid"}}}
+header : t=1750000000,v1=5fb448226598b14dea45ff94ee317c2c1edd464f87cd720b0d8673ea89731d4c</code></pre>
+<p><strong>Node/Express:</strong> use <code>app.post("/webhook", express.raw({type:"*/*"}), handler)</code> — <code>express.json()</code> consumiria o corpo cru e a assinatura nunca bateria.</p>
+<div class="note"><strong>Boas práticas:</strong> responda 2xx em ≤10 s (enfileire o processamento); deduplique pelo <code>id</code> do evento (entrega at-least-once, sem ordem garantida); ignore com 2xx qualquer <code>type</code> que não tratar; consulte o log de entregas e o reenvio manual no painel quando algo falhar.</div>
+
+<h2 id="erros">Erros e limites</h2>
+<p>Envelope único: <code>{"error":{"type","code","message","param?","retry_after_seconds?"}}</code> — catálogo completo na <a href="/referencia.html#erros">referência</a>. Limites: <strong>120 requisições/min por chave</strong> (acima → <code>429</code>; recue com backoff exponencial), corpo até 64&nbsp;KB, listagem em páginas de 25 com cursor <code>starting_after</code>.</p>
+<h3 id="bloqueio-telemovel">Bloqueio por telemóvel (MB WAY)</h3>
+<p><strong>Um telemóvel, um pedido MB WAY de cada vez.</strong> Enquanto um pedido MB WAY está à espera de confirmação no app do cliente, o mesmo número não consegue iniciar outro — em nenhuma loja da Broski. A tentativa devolve <code>409 mbway_pending_for_phone</code> com <code>retry_after_seconds</code> (e o header <code>Retry-After</code>) e uma <code>message</code> já escrita para o cliente final:</p>
+<pre><code>{"error":{"type":"conflict","code":"mbway_pending_for_phone",
+ "message":"Já existe um pagamento MB WAY à espera de confirmação para este número de telemóvel. Abra o app MB WAY e confirme (ou recuse) esse pagamento antes de iniciar outro. Se preferir, aguarde 4 minutos e tente de novo.",
+ "retry_after_seconds":240}}</code></pre>
+<div class="note"><strong>No seu checkout:</strong> mostre a <code>message</code> tal e qual e não trate como falha de pagamento. <strong>Nada foi criado</strong> (nem na Broski nem na rede MB WAY) — pode reenviar exatamente o mesmo pedido (mesma <code>external_reference</code> e <code>Idempotency-Key</code>) depois de <code>retry_after_seconds</code>. O bloqueio cai no instante em que o cliente confirma ou recusa o push no app, ou expira em no máximo ~5 minutos. Porquê: dois pushes vivos para o mesmo número faziam o cliente pagar um e ver o outro "recusado" — ou pagar os dois.</div>
+
+<h2 id="recebimentos">Recebimentos</h2>
+<p>Cada venda confirmada entra no seu saldo (painel → Saldo) e passa por um breve período de retenção antes de ficar <strong>disponível</strong>. O saque para o seu IBAN é pedido no painel (Saques) e passa por revisão. Extrato completo, taxas aplicadas e comprovantes: tudo no painel.</p>
+
+<h2 id="testes">Ambientes e testes</h2>
+<p>A API opera hoje em <strong>produção</strong> — o campo <code>livemode</code> nas respostas identifica o ambiente e já prepara a sua integração para o modo de teste sem breaking change.</p>
+<p><strong>Como testar com segurança hoje:</strong></p>
+<ul>
+<li>Crie um pedido MB WAY de <code>50</code> (€0,50 — o mínimo real) para o seu próprio telemóvel, confirme, e verifique o webhook <code>order.paid</code>; depois estorne via API.</li>
+<li>Valide a sua verificação de assinatura contra o <a href="#webhooks">vetor de teste</a> antes de ir ao ar.</li>
+<li>Acompanhe entregas de webhook (e reenvie manualmente) no painel.</li>
+</ul>
+<p>O modo de teste com chaves <code>sk_test_</code> está em desenvolvimento e será anunciado no <a href="#suporte">changelog</a>.</p>
+
+<h2 id="producao">Checklist de produção</h2>
+<ol>
+<li>Conta verificada e ativa no painel.</li>
+<li>Chave <code>sk_live_</code> guardada só no servidor (variável de ambiente/secret manager).</li>
+<li><code>Idempotency-Key</code> derivada do seu pedido em toda criação.</li>
+<li>Voucher Multibanco exibido com entidade, referência, valor e prazo.</li>
+<li>Webhook HTTPS cadastrado; assinatura verificada (vetor de teste passa); dedupe por <code>id</code>; resposta 2xx ≤ 10 s.</li>
+<li>Liberação do produto <em>somente</em> no <code>order.paid</code> (nunca na criação).</li>
+<li>Tratamento de <code>429</code> com backoff e de <code>402/expired/failed</code> com mensagem clara ao cliente.</li>
+</ol>
+
+<h2 id="suporte">Suporte e changelog</h2>
+<p>Dúvidas de integração: <a href="/cdn-cgi/l/email-protection#f88b8d88978a8c9db89a8a978b9391d6888c"><span class="__cf_email__" data-cfemail="542721243b2620311436263b273f3d7a2420">[email&#160;protected]</span></a>. Mudanças na API são sempre aditivas dentro de <code>/v1</code> e anunciadas nesta página antes de entrar em vigor.</p>
+<h3>Changelog</h3>
+<ul><li><strong>2026-09-06</strong> — <strong>Bloqueio por telemóvel (MB WAY):</strong> novo erro <code>409 mbway_pending_for_phone</code> com <code>retry_after_seconds</code> e header <code>Retry-After</code>, mensagem pronta para o cliente final; explicado no prompt para IA, na referência e no OpenAPI.</li>
+<li><strong>2026-07-19</strong> — Docs enriquecidas: o prompt para IA agora traz o <strong>envelope real</strong> dos webhooks (order.paid + shapes de payout/dispute) e ganhou botões de <em>copiar</em> e <em>expandir</em>.</li>
+<li><strong>2026-07-19</strong> — Campo <code>checkout_url</code> no <code>POST /v1/orders</code> (URL http(s) ≤1024 da página de checkout da venda) passa a fazer parte da integração recomendada — envie sempre. Aditivo — nada muda para integrações existentes.</li>
+<li><strong>2026-07-16</strong> — Publicação da documentação e do <a href="/openapi.yaml">openapi.yaml</a>. Superfície: pedidos (criar/consultar/listar), estornos, 5 eventos de webhook.</li></ul>
+<footer>Broski · <a href="/referencia.html">Referência da API</a> · <a href="/openapi.yaml">OpenAPI</a> · <a href="/cdn-cgi/l/email-protection" class="__cf_email__" data-cfemail="fc8f898c938e8899bc9e8e938f9795d28c88">[email&#160;protected]</a></footer>
+</main></div><script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script><script src="/copy.js" defer></script><script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/v4bc70e2c01a94c73b74392e4234840661791215815920" integrity="sha512-L0ha0OXavK/8okipN9F8BtP84dg9DUhPERbBXzwI6dgTA55d2+yweo3pn5CSFYs45/r8md2+xvUPtTdvTNRfjA==" data-cf-beacon='{"version":"2024.11.0","token":"3925c0bce97d414080bab411f5b5b4bd","r":1,"spa":2}' crossorigin="anonymous"></script>
+</body></html>

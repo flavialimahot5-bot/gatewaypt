@@ -1,0 +1,16 @@
+import { build } from "esbuild";
+import assert from "node:assert/strict";
+const compiled = await build({ entryPoints: ["app/api/cep/[cep]/route.ts"], bundle: true, write: false, platform: "node", format: "esm" });
+const { GET } = await import("data:text/javascript;base64," + Buffer.from(compiled.outputFiles[0].text).toString("base64"));
+let calls = 0;
+let result = { logradouro: "Praça da Sé", bairro: "Sé", localidade: "São Paulo", uf: "SP" };
+globalThis.fetch = async (url) => { calls++; assert.equal(url, "https://viacep.com.br/ws/01001000/json/"); return Response.json(result); };
+const read = cep => GET(new Request("https://example.com/api/cep/" + cep), { params: Promise.resolve({ cep }) });
+assert.equal((await read("../admin")).status, 400);
+assert.equal(calls, 0);
+assert.deepEqual(await (await read("01001000")).json(), { street: "Praça da Sé", district: "Sé", city: "São Paulo", state: "SP" });
+result = { erro: true };
+assert.equal((await read("01001000")).status, 404);
+globalThis.fetch = async () => { throw new Error("offline"); };
+assert.equal((await read("01001000")).status, 503);
+console.log("CEP: valid lookup, invalid input, not found and unavailable passed.");

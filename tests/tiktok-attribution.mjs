@@ -1,0 +1,12 @@
+import {build} from 'esbuild';import assert from 'node:assert/strict';
+await build({entryPoints:['lib/tiktok-tracking.ts'],outfile:'.sites-runtime/tiktok-client-test.mjs',bundle:true,platform:'node',format:'esm'});
+const {checkoutAttribution}=await import('../.sites-runtime/tiktok-client-test.mjs');
+const data=new Map();globalThis.sessionStorage={getItem:k=>data.get(k)||null,setItem:(k,v)=>data.set(k,v)};globalThis.document={cookie:''};
+globalThis.location={href:'https://checkout.example/comprar/a?ttclid=real-click-1&ttp=landing-cookie-1'};
+const first=checkoutAttribution('a');assert.equal(first.ttclid,'real-click-1');assert.equal(first.ttp,'landing-cookie-1');
+location.href='https://checkout.example/comprar/a';assert.deepEqual(checkoutAttribution('a'),first);
+location.href='https://checkout.example/comprar/b?ttclid='+encodeURIComponent('bad<script>')+'&ttp='+encodeURIComponent('invalid cookie');assert.equal(checkoutAttribution('b').ttclid,undefined);assert.equal(checkoutAttribution('b').ttp,undefined);
+document.cookie='other=1;_ttp=real-cookie';assert.equal(checkoutAttribution('c').ttp,'real-cookie');
+location.href='https://checkout.example/comprar/a?ttclid=real-click-2&ttp=landing-cookie-2';assert.equal(checkoutAttribution('a').ttclid,'real-click-2');assert.equal(checkoutAttribution('a').ttp,'landing-cookie-2');
+location.href='https://checkout.example/comprar/d';document.cookie='';sessionStorage.getItem=()=>{throw Error('blocked')};sessionStorage.setItem=()=>{throw Error('blocked')};assert.ok(checkoutAttribution('d').visit);assert.equal(checkoutAttribution('d').ttp,undefined);
+console.log('TikTok attribution: cross-domain identifiers, same-product persistence, invalid input and blocked storage passed.');

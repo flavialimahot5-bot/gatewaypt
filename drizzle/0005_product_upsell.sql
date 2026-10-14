@@ -1,0 +1,1 @@
+ALTER TABLE `products` ADD `upsell_url` text;

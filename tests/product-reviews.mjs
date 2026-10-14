@@ -1,0 +1,25 @@
+import { build } from "esbuild";
+import { mkdirSync } from "node:fs";
+import assert from "node:assert/strict";
+import React from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+
+mkdirSync(".sites-runtime", { recursive: true });
+await build({ entryPoints: ["app/comprar/store-reviews.tsx"], outfile: ".sites-runtime/reviews-render.mjs", bundle: true, platform: "node", format: "esm", packages: "external", jsx: "automatic" });
+const { default: Reviews } = await import("../.sites-runtime/reviews-render.mjs");
+const render = reviews => renderToStaticMarkup(React.createElement(Reviews, { reviews }));
+assert.equal(render([]), "", "products without reviews must not inherit generic testimonials");
+const review = { id: "local-only", name: '<script>alert("test")</script>', rating: 2, text: "<img src=x onerror=alert(1)>", photo: "" };
+const single = render([review]);
+assert.ok(single.includes("2 de 5 estrelas"));
+assert.ok(single.includes("★★☆☆☆"));
+assert.ok(single.includes("&lt;script&gt;"));
+assert.ok(single.includes("&lt;img"));
+assert.ok(!single.includes("<script"));
+assert.ok(!single.includes("<img"), "a review without photo must not display someone else's avatar");
+assert.ok(!single.includes("<button"), "one review must not display carousel controls");
+const multiple = render([review, { ...review, id: "second", name: "Outro cliente", rating: 5, text: "Outro comentário" }]);
+assert.equal((multiple.match(/<article/g) || []).length, 2);
+assert.equal((multiple.match(/<button/g) || []).length, 2);
+assert.ok(multiple.includes("5 de 5 estrelas"));
+console.log("Product review rendering: empty state, actual ratings, escaped content, optional photos and carousel passed.");
