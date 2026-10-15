@@ -40,7 +40,7 @@ export default function PushPanel() {
       const bytes=Uint8Array.from(atob(publicKey.replace(/-/g,'+').replace(/_/g,'/')),c=>c.charCodeAt(0));
       const subscription=await registration.pushManager.getSubscription() || await registration.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:bytes});
       await api('admin/push',{method:'POST',body:JSON.stringify(subscription.toJSON())});
-      setEnabled(true);setMessage('Pronto! Este aparelho receberá avisos de Pix pendente e venda aprovada.');
+      setEnabled(true);setMessage('Pronto! Este aparelho receberá avisos de pagamento pendente e venda aprovada.');
     }catch(e){setFailure(true);setMessage((e as Error).message);}
     finally{setBusy(false);}
   }
@@ -70,7 +70,7 @@ export default function PushPanel() {
       <span className="badge">{enabled ? 'Avisos ativos' : installed ? 'App instalado' : 'Sem App Store'}</span></div>
     {!installed && <div className="push-install"><Share2 size={22}/><div><strong>Instale no iPhone</strong><p>Abra este painel no Safari, toque em Compartilhar e depois em “Adicionar à Tela de Início”. Abra pelo ícone Goti Pay e entre na sua conta.</p></div></div>}
     <div className="push-preview"><span className="push-preview-icon"><img src="/goti-pay-avatar.jpg" alt="" width={42} height={42} style={{borderRadius:10}}/></span><div><small>GOTI PAY · AGORA</small><strong>Transação Paga! 🤹🏻</strong><p>from Goti Pay<br/>Valor: € 75,90</p></div></div>
-    <p className="muted">Avisos de Pix gerado/pendente e pagamento confirmado. No iPhone, requer iOS 16.4 ou mais recente e permissão de notificações. O valor da venda pode aparecer na tela bloqueada.</p>
+    <p className="muted">Avisos de pagamento pendente e pagamento confirmado. No iPhone, requer iOS 16.4 ou mais recente e permissão de notificações. O valor da venda pode aparecer na tela bloqueada.</p>
     {ready && !supported && <p className="info-note">{ios ? 'Abra pelo ícone na Tela de Início para ativar os avisos.' : 'Este navegador não suporta notificações push. Use um navegador compatível ou o app instalado.'}</p>}
     <div className="form-actions">
       {enabled ? <><button className="primary" disabled={busy} onClick={test}><Send size={16}/> Enviar aviso de teste</button><button className="secondary-button" disabled={busy} onClick={disable}><BellOff size={16}/> Desativar neste aparelho</button></>

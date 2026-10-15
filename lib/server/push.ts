@@ -89,7 +89,7 @@ export function paymentPushPayload(row: { event: string; transaction_id: string;
   const portugal = row.external_source === "broski";
   const amount = new Intl.NumberFormat(portugal ? "pt-PT" : "pt-BR", { style: "currency", currency: portugal ? "EUR" : "BRL" }).format(row.amount / 100);
   return {
-    title: portugal ? "Pagamento aprovado · Portugal 🇵🇹" : row.event === "PAID" ? "Transação Paga! 🤹🏻" : "Transação Pendente!",
+    title: portugal ? (row.event === "PAID" ? "Pagamento aprovado · Portugal 🇵🇹" : "Pagamento pendente · Portugal 🇵🇹") : row.event === "PAID" ? "Transação Paga! 🤹🏻" : "Transação Pendente!",
     body: portugal ? `Valor: ${amount} · ${row.external_method === "mbway" ? "MB WAY" : "Multibanco"} · Broski` : `Valor: ${amount}`,
     tag: "braks-" + row.transaction_id + "-" + row.event,
     url: portugal ? "/topsdlsodo?section=Gateways" : "/topsdlsodo?section=Vendas",
@@ -105,7 +105,7 @@ export async function dispatchPush(limit = 10) {
       .bind(time,cutoff),
     db().prepare("UPDATE push_events SET fanout_at=? WHERE fanout_at IS NULL AND created_at>=?").bind(time,cutoff),
   ]);
-  const due = await db().prepare("SELECT d.*,e.event,e.transaction_id,e.created_at,e.external_source,e.external_method,s.owner,s.credential_version,s.subscription,CASE WHEN e.external_source='broski' THEN e.external_amount ELSE t.amount END AS amount,CASE WHEN e.external_source='broski' THEN 'PAID' ELSE t.status END AS status FROM push_deliveries d JOIN push_events e ON e.id=d.event_id JOIN push_subscriptions s ON s.id=d.subscription_id LEFT JOIN transactions t ON t.id=e.transaction_id WHERE (t.id IS NOT NULL OR (e.external_source='broski' AND e.external_currency='EUR' AND e.external_amount>0 AND e.event='PAID')) AND d.sent_at IS NULL AND d.attempts<8 AND d.next_at<=? AND d.lease_until<? AND s.revoked_at IS NULL AND e.created_at>=s.created_at AND e.created_at>=? ORDER BY d.next_at LIMIT ?")
+  const due = await db().prepare("SELECT d.*,e.event,e.transaction_id,e.created_at,e.external_source,e.external_method,s.owner,s.credential_version,s.subscription,CASE WHEN e.external_source='broski' THEN e.external_amount ELSE t.amount END AS amount,CASE WHEN e.external_source='broski' THEN COALESCE(t.status,'PAID') ELSE t.status END AS status FROM push_deliveries d JOIN push_events e ON e.id=d.event_id JOIN push_subscriptions s ON s.id=d.subscription_id LEFT JOIN transactions t ON t.id=e.transaction_id WHERE (t.id IS NOT NULL OR (e.external_source='broski' AND e.external_currency='EUR' AND e.external_amount>0 AND e.event='PAID')) AND d.sent_at IS NULL AND d.attempts<8 AND d.next_at<=? AND d.lease_until<? AND s.revoked_at IS NULL AND e.created_at>=s.created_at AND e.created_at>=? ORDER BY d.next_at LIMIT ?")
     .bind(now(),now(),now()-86400000,limit).all<any>();
   let sent = 0;
   await Promise.all(due.results.map(async row => {

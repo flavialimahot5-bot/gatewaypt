@@ -32,7 +32,7 @@ export function usePanelNotifications() {
 function Notice({ notice, hidden, dismiss }: { notice: PanelNotice; hidden: boolean; dismiss: (id: string) => void }) {
   useEffect(() => { const timer = setTimeout(() => dismiss(notice.id), 9000); return () => clearTimeout(timer); }, [notice.id, dismiss]);
   const test = notice.event === "TEST", paid = notice.event === "PAID";
-  const title = test ? "Aviso de teste" : paid ? "Venda aprovada!" : "Pix gerado!";
+  const title = test ? "Aviso de teste" : paid ? "Venda aprovada!" : "Pagamento pendente!";
   return <article className={`sale-notice ${paid || test ? "sale-notice-paid" : "sale-notice-pending"}`}>
     <img src="/goti-pay-avatar.jpg" alt="" width={42} height={42}/>
     <div className="sale-notice-content"><strong>{title}</strong><span>Goti Pay{notice.source === "broski" ? " · Portugal" : ""}</span>
@@ -46,7 +46,7 @@ export function PanelNoticeStack({ notices, hidden, dismiss }: { notices: PanelN
 }
 export function PanelNoticeSettings({ enabled, toggle, test }: { enabled: boolean; toggle: () => void; test: () => void }) {
   return <section className="surface section-stack"><div className="section-heading"><h3><Bell size={18}/> Avisos dentro da plataforma</h3><span className="badge">{enabled ? "Ativos neste navegador" : "Desativados"}</span></div>
-    <p>Pix gerado e venda aprovada aparecem no canto superior direito enquanto você usa o painel. Não precisa permitir notificações do Windows.</p>
+    <p>Pagamento pendente e venda aprovada aparecem no canto superior direito enquanto você usa o painel. Não precisa permitir notificações do Windows.</p>
     <div className="form-actions"><button className="primary" type="button" onClick={test}>Testar aviso no painel</button><button className="secondary-button" type="button" onClick={toggle}>{enabled ? "Desativar avisos no painel" : "Ativar avisos no painel"}</button></div>
   </section>;
 }

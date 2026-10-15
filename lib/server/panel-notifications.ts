@@ -15,7 +15,7 @@ export async function panelNotifications(cursor: string | null) {
   const rows = await db().prepare(`SELECT e.rowid AS sequence,e.id,e.event,e.created_at,e.external_source,
     CASE WHEN e.external_source='broski' THEN e.external_amount ELSE t.amount END AS amount,
     CASE WHEN e.external_source='broski' THEN 'EUR' ELSE 'BRL' END AS currency,
-    CASE WHEN e.external_source='broski' THEN 'PAID' ELSE t.status END AS current_status
+    CASE WHEN e.external_source='broski' THEN COALESCE(t.status,'PAID') ELSE t.status END AS current_status
     FROM push_events e LEFT JOIN transactions t ON t.id=e.transaction_id
     WHERE e.rowid>? ORDER BY e.rowid LIMIT 50`).bind(Number(cursor)).all<any>();
   return {

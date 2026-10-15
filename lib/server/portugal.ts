@@ -104,6 +104,12 @@ async function applyOrder(o: any, value: unknown, webhook: boolean, eventId?: st
   // Keep the original dashboard and sales history backed by the same transaction model.
   writes.push(db().prepare(`INSERT OR IGNORE INTO transactions(id,key_id,idempotency_key,request_hash,provider_id,gateway,external_reference,amount,fee,net,status,checkout_hash,checkout_token,description,customer,created_at,updated_at,lease_until) VALUES(?,?,?,?,?,'broski',?,?,0,0,'PENDING',?,?,?,?,?,?,0)`).bind(o.id,'product:'+o.product_id,o.id,o.request_hash,p.id,o.id,o.amount,hash(o.id),seal(o.id,crypt()),payload.description,seal(JSON.stringify(payload.customer),crypt()),o.created_at,timestamp));
   writes.push(db().prepare(`UPDATE transactions SET status=(SELECT CASE status WHEN 'awaiting_payment' THEN 'PENDING' ELSE upper(status) END FROM pt_orders WHERE id=?),paid_at=CASE WHEN ?='paid' THEN COALESCE(paid_at,?) ELSE paid_at END,updated_at=? WHERE id=?`).bind(o.id,status,timestamp,timestamp,o.id));
+  // Commit notifications with the payment, once per order/status, not per webhook.
+  writes.push(db().prepare(`INSERT OR IGNORE INTO push_events(id,transaction_id,event,created_at,external_source,external_amount,external_currency,external_method)
+    SELECT 'pt:'||lower(t.status)||':'||t.id,t.id,t.status,CASE WHEN t.status='PAID' THEN t.paid_at ELSE t.created_at END,'broski',t.amount,'EUR',?
+    FROM transactions t JOIN settings s ON s.id='push_started_at'
+    WHERE t.id=? AND t.status IN ('PENDING','PAID') AND
+    CASE WHEN t.status='PAID' THEN t.paid_at ELSE t.created_at END>=CAST(s.value AS INTEGER)`).bind(o.method,o.id));
   await db().batch(writes);
 }
 export async function ptWebhook(request: Request) {
