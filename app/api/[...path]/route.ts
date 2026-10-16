@@ -1,4 +1,4 @@
-import { ptOverview } from "@/lib/server/portugal";
+import { ptOverview, reconcilePortugalOrders } from "@/lib/server/portugal";
 import {
   findProduct,
   publicProduct,
@@ -337,6 +337,7 @@ async function handle(request: Request) {
     if (path === "admin/recovery" || path.startsWith("admin/recovery/"))
       return json({ error: { code: "recovery_removed", message: "Recuperacao por WhatsApp removida." } }, 410);
     if (path === "admin/analytics" && method === "GET") {
+      after(async()=>{await reconcilePortugalOrders();await Promise.all([pushBackground(),trackingBackground()]);});
       const [analytics, notifications] = await Promise.all([analyticsOverview(url.searchParams), panelNotifications(url.searchParams.get("notification_cursor"))]);
       return json({ ...analytics, notifications });
     }
@@ -379,7 +380,7 @@ async function handle(request: Request) {
     if (path.startsWith("admin/products/") && method === "POST")
       return json(await saveProduct(request, user.email, path.slice(15)));
     if (path === "admin/overview" && method === "GET") {
-      after(async () => { await Promise.all([pushBackground(), trackerOrderBackground(), trackingBackground()]); });
+      after(async () => { await reconcilePortugalOrders();await Promise.all([pushBackground(), trackerOrderBackground(), trackingBackground()]); });
       const day =
         url.searchParams.get("date") ||
         new Date().toLocaleDateString("en-CA", {

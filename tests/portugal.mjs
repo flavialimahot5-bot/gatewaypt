@@ -65,6 +65,18 @@ assert.equal(sql.prepare("SELECT count(*) n FROM tracking_events WHERE event='Pu
 tiktokStatus=40002;await m.dispatchTracking();assert.equal(sql.prepare('SELECT count(*) n FROM tracking_events WHERE delivered_at IS NOT NULL').get().n,0);
 const ids=tiktokCalls.map(e=>e.data[0].event_id).sort();sql.prepare('UPDATE tracking_events SET next_at=0').run();tiktokStatus=0;assert.equal((await m.dispatchTracking()).sent,3);assert.deepEqual(tiktokCalls.slice(3).map(e=>e.data[0].event_id).sort(),ids);assert.equal((await m.dispatchTracking()).sent,0);
 assert.equal(tiktokCalls.at(-1).event_source_id,'ABCDEFGHIJKLMNOP');
+const recovered=await m.ptCreate(req({...body(),tracking}),'digital');
+const providerPaidAt=new Date().toISOString();const recoveredProvider=upstream.get('ord_'+recovered.id);
+upstream.set(recoveredProvider.id,{...recoveredProvider,status:'paid',paid_at:providerPaidAt});
+sql.prepare('UPDATE pt_orders SET created_at=?,fallback_at=? WHERE id=?').run(Date.now()-120000,Date.now()-61000,recovered.id);
+await m.reconcilePortugalOrders();assert.equal((await m.ptStatus(recovered.id)).status,'paid');
+assert.equal(sql.prepare('SELECT paid_at FROM transactions WHERE id=?').get(recovered.id).paid_at,Date.parse(providerPaidAt));
+assert.equal(sql.prepare("SELECT count(*) n FROM push_events WHERE transaction_id=? AND event='PAID'").get(recovered.id).n,1);
+assert.equal(sql.prepare("SELECT count(*) n FROM tracking_events WHERE event='Purchase'").get().n,2);
+const callsAfterReconcile=calls.length;await m.reconcilePortugalOrders();assert.equal(calls.length,callsAfterReconcile);
+await m.ptWebhook(event({...recoveredProvider,status:'paid',paid_at:providerPaidAt}));
+assert.equal(sql.prepare("SELECT count(*) n FROM push_events WHERE transaction_id=? AND event='PAID'").get(recovered.id).n,1);
+const mismatched=await m.ptCreate(req(body()),'digital');const wrong=upstream.get('ord_'+mismatched.id);upstream.set(wrong.id,{...wrong,status:'paid',amount:1});sql.prepare('UPDATE pt_orders SET created_at=? WHERE id=?').run(Date.now()-61000,mismatched.id);assert.equal((await m.ptStatus(mismatched.id)).status,'pending');
 globalThis.__pt.env.PUBLIC_API_ENABLED='false';await assert.rejects(()=>m.ptCreate(req(body()),'digital'),e=>e.code==='payments_disabled');
 console.log('Portugal: EUR notifications, pending/paid push dispatch, deduplication, stale pending suppression, signature, normalization, server prices, idempotency, timeout replay, phone blocking, webhook mismatch/dedupe/order, refund replay, voucher expiry and bounded fallback passed. No real network requests.');
 

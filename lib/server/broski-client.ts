@@ -12,7 +12,7 @@ export const BroskiOrder = z.object({
   id: z.string().min(1), amount: z.number().int().positive(), currency: z.literal('EUR'),
   method: z.enum(['mbway', 'multibanco']), external_reference: z.string(),
   status: z.enum(['pending', 'awaiting_payment', 'paid', 'failed', 'expired', 'refunded']),
-  livemode: z.boolean(), amount_refunded: z.number().int().nonnegative().optional(),
+  livemode: z.boolean(), paid_at: z.string().datetime().nullable().optional(), amount_refunded: z.number().int().nonnegative().optional(),
   multibanco: z.object({ entity: z.string(), reference: z.string(), amount: z.number().int(), expires_at: z.string().datetime() }).optional(),
 });
 export class BroskiError extends ApiError {

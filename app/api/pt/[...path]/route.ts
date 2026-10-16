@@ -16,7 +16,7 @@ async function handle(request:Request) {
         const result=await ptCreate(request,path.slice(9));
         after(async()=>{await Promise.all([sendVoucherEmails(),pushBackground(),trackingBackground()]);}); return json(result);
       }
-      if(path.startsWith('orders/') && request.method==='GET') return json(await ptStatus(path.slice(7)));
+      if(path.startsWith('orders/') && request.method==='GET') {const result=await ptStatus(path.slice(7));after(async()=>{await Promise.all([pushBackground(),trackingBackground()]);});return json(result);}
       const user=await admin(request);
       if(path==='provider-orders' && request.method==='GET') return json(await ptProviderOrders(new URL(request.url).searchParams));
       if(path.startsWith('provider-orders/') && request.method==='GET') return json(await ptProviderOrder(path.slice(16)));

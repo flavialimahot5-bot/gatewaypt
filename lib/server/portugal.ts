@@ -33,20 +33,36 @@ async function get(id: string) {
 export async function ptStatus(id: string) {
   await rateLimit('pt:status:'+hash(id),60);
   let o = await get(id);
-  if(o.method==='mbway' && o.provider_id && o.status==='pending' && !o.fallback_at && now()-o.created_at>=60000) {
-    const claim=await db().prepare('UPDATE pt_orders SET fallback_at=? WHERE id=? AND fallback_at=0').bind(now(),id).run();
+  if(o.provider_id && ['pending','awaiting_payment'].includes(o.status) && now()-(o.fallback_at||o.created_at)>=60000) {
+    const claim=await db().prepare('UPDATE pt_orders SET fallback_at=? WHERE id=? AND COALESCE(NULLIF(fallback_at,0),created_at)<=?').bind(now(),id,now()-60000).run();
     if(claim.meta.changes) try {
       await rateLimit('broski:global',100);
       const p=await broskiRequest('/orders/'+encodeURIComponent(o.provider_id),(await config()).token);
-      await applyOrder(o,p,false);
+      await applyOrder(o,p,true);
       o=await get(id);
-    } catch { /* One bounded reconciliation only; payment confirmation remains webhook-only. */ }
+    } catch { /* A failed authenticated lookup may be retried after the throttle. */ }
   }
   const voucher = o.voucher ? JSON.parse(o.voucher) : undefined;
   const expired = voucher && Date.parse(voucher.expires_at) <= now() && !['paid','refunded'].includes(o.status);
   const snapshot = await db().prepare('SELECT snapshot FROM product_orders WHERE id=?').bind(id).first<any>();
   const saved = snapshot ? JSON.parse(snapshot.snapshot) : null;
   return { id: o.id, status: expired ? 'expired' : o.status, method: o.method, amount: o.amount, currency: 'EUR', created_at: o.created_at, multibanco: expired ? undefined : voucher, redirect_url: o.status==='paid' ? saved?.upsell_url || null : null };
+}
+export async function reconcilePortugalOrders() {
+  const c=await config();
+  if(!c.token)return;
+  const timestamp=now();
+  // One shared batch every minute, including across concurrent serverless instances.
+  const claim=await db().prepare(`INSERT INTO settings(id,value,updated_at) VALUES ('pt_reconcile_at',?,?)
+    ON CONFLICT(id) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at
+    WHERE settings.updated_at<? RETURNING id`).bind(String(timestamp),timestamp,timestamp-60000).first();
+  if(!claim)return;
+  const rows=await db().prepare(`SELECT id FROM pt_orders WHERE provider_id IS NOT NULL
+    AND status IN ('pending','awaiting_payment') AND created_at>=?
+    AND COALESCE(NULLIF(fallback_at,0),created_at)<=?
+    ORDER BY fallback_at,created_at LIMIT 20`).bind(timestamp-30*86400000,timestamp-60000).all<{id:string}>();
+  for(let i=0;i<rows.results.length;i+=5)
+    await Promise.allSettled(rows.results.slice(i,i+5).map(row=>ptStatus(row.id)));
 }
 export async function ptCreate(request: Request, productId: string) {
   assertOrigin(request, env.APP_ORIGIN || '');
@@ -96,19 +112,21 @@ export async function ptCreate(request: Request, productId: string) {
   }
   return ptStatus(id);
 }
-async function applyOrder(o: any, value: unknown, webhook: boolean, eventId?: string) {
+async function applyOrder(o: any, value: unknown, confirmed: boolean, eventId?: string) {
   const p = BroskiOrder.parse(value);
   if (p.amount !== o.amount || p.method !== o.method || p.external_reference !== o.id || (o.provider_id && o.provider_id !== p.id)) throw new ApiError(409,'provider_mismatch','O pagamento não corresponde ao pedido.');
   if (p.multibanco && p.multibanco.amount !== o.amount) throw new ApiError(409,'voucher_mismatch','Valor da referência inválido.');
   if (!p.livemode) throw new ApiError(422,'test_order','Pagamento de teste não pode confirmar uma venda.');
-  const status = webhook ? p.status : (p.status === 'paid' || p.status === 'refunded' ? 'pending' : p.status);
+  // Confirm only from a signed webhook or an authenticated GET to the provider.
+  const status = confirmed ? p.status : (p.status === 'paid' || p.status === 'refunded' ? 'pending' : p.status);
   const timestamp = now();
+  const paidAt=p.paid_at?Date.parse(p.paid_at):timestamp;
   const writes = [db().prepare(`UPDATE pt_orders SET provider_id=?,status=CASE WHEN status='refunded' THEN status WHEN status='paid' AND ?<>'refunded' THEN status WHEN status IN ('failed','expired') AND ? NOT IN ('paid','refunded') THEN status ELSE ? END,voucher=COALESCE(?,voucher),refunded=MAX(refunded,?),updated_at=?,lease_until=0 WHERE id=?`).bind(p.id,status,status,status,p.multibanco ? JSON.stringify(p.multibanco):null,p.amount_refunded || 0,timestamp,o.id)];
   if (eventId) writes.push(db().prepare('INSERT OR IGNORE INTO pt_events(id,order_id,received_at) VALUES(?,?,?)').bind(eventId,o.id,timestamp));
   const payload = JSON.parse(unseal(o.payload,crypt()));
   // Keep the original dashboard and sales history backed by the same transaction model.
   writes.push(db().prepare(`INSERT OR IGNORE INTO transactions(id,key_id,idempotency_key,request_hash,provider_id,gateway,external_reference,amount,fee,net,status,checkout_hash,checkout_token,description,customer,created_at,updated_at,lease_until) VALUES(?,?,?,?,?,'broski',?,?,0,0,'PENDING',?,?,?,?,?,?,0)`).bind(o.id,'product:'+o.product_id,o.id,o.request_hash,p.id,o.id,o.amount,hash(o.id),seal(o.id,crypt()),payload.description,seal(JSON.stringify(payload.customer),crypt()),o.created_at,timestamp));
-  writes.push(db().prepare(`UPDATE transactions SET status=(SELECT CASE status WHEN 'awaiting_payment' THEN 'PENDING' ELSE upper(status) END FROM pt_orders WHERE id=?),paid_at=CASE WHEN ?='paid' THEN COALESCE(paid_at,?) ELSE paid_at END,updated_at=? WHERE id=?`).bind(o.id,status,timestamp,timestamp,o.id));
+  writes.push(db().prepare(`UPDATE transactions SET status=(SELECT CASE status WHEN 'awaiting_payment' THEN 'PENDING' ELSE upper(status) END FROM pt_orders WHERE id=?),paid_at=CASE WHEN ?='paid' THEN COALESCE(paid_at,?) ELSE paid_at END,updated_at=? WHERE id=?`).bind(o.id,status,paidAt,timestamp,o.id));
   // Commit notifications with the payment, once per order/status, not per webhook.
   writes.push(db().prepare(`INSERT OR IGNORE INTO push_events(id,transaction_id,event,created_at,external_source,external_amount,external_currency,external_method)
     SELECT 'pt:'||lower(t.status)||':'||t.id,t.id,t.status,CASE WHEN t.status='PAID' THEN t.paid_at ELSE t.created_at END,'broski',t.amount,'EUR',?
