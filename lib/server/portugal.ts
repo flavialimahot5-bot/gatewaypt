@@ -1,3 +1,4 @@
+import { trackingInput, rememberOrderTracking, safeTrackTransaction } from './tiktok';
 import { z } from 'zod';
 import { db, env, now, setting, putSetting, audit, rateLimit } from './core';
 import { ApiError, seal, unseal, hash, verify, readJson, assertOrigin } from './security';
@@ -22,7 +23,7 @@ export async function ptConfigure(request: Request, actor: string) {
   return ptOverview();
 }
 const Buyer = z.object({ name: z.string().trim().min(2).max(120), email: z.string().email().max(254), phone: z.string().max(30).optional(), nif: z.string().regex(/^\d{9}$/).optional(), address: z.object({ line1: z.string().trim().min(3).max(200), line2: z.string().max(200).optional(), postal_code: z.string().regex(/^\d{4}-\d{3}$/), city: z.string().trim().min(2).max(100), region: z.string().trim().max(100).optional(), country: z.literal('PT').default('PT') }).strict().optional() }).strict();
-const Input = z.object({ attempt: z.string().uuid(), visit: z.string().uuid().optional(), quantity: z.number().int().min(1).max(100).default(1), method: z.enum(['mbway','multibanco']), customer: Buyer }).strict();
+const Input = z.object({ attempt: z.string().uuid(), visit: z.string().uuid().optional(), tracking: trackingInput.optional(), quantity: z.number().int().min(1).max(100).default(1), method: z.enum(['mbway','multibanco']), customer: Buyer }).strict();
 async function get(id: string) {
   if (!/^pt_[a-f0-9-]{36}$/.test(id)) throw new ApiError(404, 'not_found', 'Pedido não encontrado.');
   const order = await db().prepare('SELECT * FROM pt_orders WHERE id=?').bind(id).first<any>();
@@ -73,6 +74,10 @@ export async function ptCreate(request: Request, productId: string) {
     o = await get(id);
     if (o.request_hash !== fingerprint) throw new ApiError(409, 'attempt_changed', 'Tentativa já utilizada.');
   }
+  if (input.tracking) {
+    try { await rememberOrderTracking(request,id,productId,input.tracking,{email:input.customer.email,phone:input.customer.phone||''},input.quantity,true); }
+    catch { console.error('TikTok attribution unavailable; payment preserved'); }
+  }
   if (o.provider_id) return ptStatus(id);
   if(input.visit) await linkCheckoutVisit(productId,input.visit,id);
   if (o.retry_at > now()) throw new BroskiError(429, 'retry_later', o.last_error || 'Aguarde antes de tentar novamente.', Math.ceil((o.retry_at-now())/1000));
@@ -111,6 +116,8 @@ async function applyOrder(o: any, value: unknown, webhook: boolean, eventId?: st
     WHERE t.id=? AND t.status IN ('PENDING','PAID') AND
     CASE WHEN t.status='PAID' THEN t.paid_at ELSE t.created_at END>=CAST(s.value AS INTEGER)`).bind(o.method,o.id));
   await db().batch(writes);
+  try { await safeTrackTransaction(await db().prepare('SELECT * FROM transactions WHERE id=?').bind(o.id).first()); }
+  catch { console.error('TikTok reconciliation deferred; payment preserved'); }
 }
 export async function ptWebhook(request: Request) {
   const { readBody } = await import('./security');

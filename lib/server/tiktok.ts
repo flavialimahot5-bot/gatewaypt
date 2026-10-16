@@ -3,7 +3,7 @@ import { z } from "zod";
 import { db, env, now, rateLimit, audit } from "./core";
 import { ApiError, assertOrigin, hash, readJson, seal, unseal } from "./security";
 
-// This checkout operates in Brazil. Never accept store, event or price from a visitor.
+// Portugal checkout. Never accept store, event or price from a visitor.
 export const TRACKING_STORE = "gateway";
 export const trackingInput = z.object({
   visit: z.string().uuid(),
@@ -17,6 +17,7 @@ type Context = {
   pixels: string[];
   product: string;
   quantity?: number;
+  currency?: "EUR" | "BRL";
   pixOptimization?: boolean;
   purchaseOnPix?: boolean;
 };
@@ -61,10 +62,16 @@ function requestUser(request: Request, input: Attribution) {
   if (ip && isIP(ip)) user.ip = ip;
   return user;
 }
-export function matchingUser(customer: {email?: string; phone?: string}) {
+export function matchingUser(customer: {email?: string; phone?: string}, portugal = false) {
   const user: Record<string, string> = {};
   if (customer.email) user.email = hash(customer.email.trim().toLowerCase());
   let phone = customer.phone?.replace(/\D/g, "") || "";
+  if (portugal) {
+    if (phone.startsWith("00351")) phone = phone.slice(2);
+    if (/^9\d{8}$/.test(phone)) phone = "351" + phone;
+    if (/^3519\d{8}$/.test(phone)) user.phone = hash("+" + phone);
+    return user;
+  }
   if (/^\d{10,11}$/.test(phone)) phone = "55" + phone;
   if (/^55\d{10,11}$/.test(phone)) user.phone = hash("+" + phone);
   return user;
@@ -76,7 +83,7 @@ async function queueEvent(event: "InitiateCheckout" | "PixGenerated" | "AddPayme
     const data = {
       event, event_id: id, event_time: Math.floor(timestamp / 1000),
       user: context.user, page: context.page,
-      properties: { currency: "BRL", value: amount / 100, content_type: "product",
+      properties: { currency: context.currency || "BRL", value: amount / 100, content_type: "product",
         contents: [{ content_id: context.product, quantity: context.quantity ?? 1 }], ...extra },
     };
     await db().prepare(
@@ -94,17 +101,17 @@ export async function startCheckoutTracking(request: Request) {
     .bind(body.product_id).first<{id: string; amount: number}>();
   if (!product) throw new ApiError(404, "not_found", "Produto indisponível.");
   const context: Context = {
-    pixels: await getActivePixels(), product: product.id,
+    pixels: await getActivePixels(), product: product.id, currency: "EUR",
     user: requestUser(request, body.tracking),
     page: { url: `${env.APP_ORIGIN}/comprar/${product.id}` },
   };
   await queueEvent("InitiateCheckout", product.id + ":" + body.tracking.visit, context, product.amount, now());
 }
 export async function rememberOrderTracking(request: Request, orderId: string, product: string,
-  input: Attribution, buyer: {email: string; phone: string}, quantity = 1) {
+  input: Attribution, buyer: {email: string; phone: string}, quantity = 1, portugal = false) {
   const context: Context = {
-    pixels: await getActivePixels(), product, quantity, pixOptimization: true, purchaseOnPix: true,
-    user: { ...requestUser(request, input), ...matchingUser(buyer) },
+    pixels: await getActivePixels(), product, quantity, currency: portugal ? "EUR" : "BRL", pixOptimization: !portugal, purchaseOnPix: !portugal,
+    user: { ...requestUser(request, input), ...matchingUser(buyer, portugal) },
     page: { url: `${env.APP_ORIGIN}/comprar/${product}` },
   };
   if (!context.pixels.length) return;
@@ -117,6 +124,8 @@ export async function trackTransaction(tx: any) {
     .bind(tx.idempotency_key).first<{context: string; created_at: number}>();
   if (!row) return; // Never backfill pre-integration orders or dashboard/API charges.
   const context: Context = JSON.parse(unseal(row.context, key()));
+  if (context.currency === "EUR" && tx.provider_id)
+    await queueEvent("AddPaymentInfo", tx.id, context, tx.amount, tx.created_at, { order_id: tx.id });
   if (tx.provider_id && tx.copy_paste) {
     // Merchant-selected conversion: one Purchase per generated Pix, never a second on settlement.
     // Versioned attribution preserves the original behavior for pre-change orders.

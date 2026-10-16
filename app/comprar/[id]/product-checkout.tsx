@@ -3,7 +3,7 @@ import {useEffect,useState,useRef} from 'react';
 import './portugal.css';
 import StoreReviews from '../store-reviews';
 import {useCheckoutPresence} from '@/lib/checkout-presence';
-import {checkoutAttribution} from '@/lib/tiktok-tracking';
+import {checkoutAttribution,initiateCheckout} from '@/lib/tiktok-tracking';
 const money=(n:number)=>(n/100).toLocaleString('pt-PT',{style:'currency',currency:'EUR'});
 function formatPostalCode(event:React.ChangeEvent<HTMLInputElement>){
  const input=event.currentTarget;
@@ -41,6 +41,7 @@ export default function ProductCheckout({product}:{product:any}) {
  }
  function submitForm(e:React.FormEvent<HTMLFormElement>){e.preventDefault();if(step<4){advance();return;}if(!uncertain){for(const field of Array.from(formRef.current?.querySelectorAll<HTMLInputElement|HTMLSelectElement>('input,select')||[])){if(!field.checkValidity()){goTo(Number(field.closest('[data-step]')?.getAttribute('data-step')||3));setTimeout(()=>field.reportValidity(),0);return;}}}void pay(e);}
 
+ useEffect(()=>{void initiateCheckout(product.id);},[product.id]);
  const storage='goti-pt:'+product.id;
  useCheckoutPresence(product.id,order?3:Math.min(step,3));
  useEffect(()=>{const existing=sessionStorage.getItem(storage);if(existing){try{const state=JSON.parse(existing);setAttempt(state.attempt);setSubmitted(state.body||'');if(state.body){setUncertain(true);setMethodChosen(true);setStep(4);try{const saved=JSON.parse(state.body);setQuantity(saved.quantity||1);setMethod(saved.method||'mbway');setDetails({name:saved.customer?.name||'',email:saved.customer?.email||'',phone:saved.customer?.phone||'',mbway_phone:saved.customer?.phone||'',nif:saved.customer?.nif||'',...saved.customer?.address});}catch{}}if(state.order)setOrder(state.order);}catch{}}},[storage]);
@@ -51,8 +52,8 @@ export default function ProductCheckout({product}:{product:any}) {
  const expired=order?.method==='multibanco' && order.multibanco && Date.parse(order.multibanco.expires_at)<=clock;
  const timedOut=order?.method==='mbway' && clock-order.created_at>300000 && ['creating','pending'].includes(order.status);
  async function pay(e:React.FormEvent<HTMLFormElement>){e.preventDefault();setBusy(true);setError('');const f=new FormData(e.currentTarget);let id=attempt||crypto.randomUUID();const customer:any={name:[f.get('name'),f.get('surname')].filter(Boolean).join(' '),email:f.get('email'),phone:(method==='mbway'?f.get('mbway_phone')||f.get('phone'):f.get('phone'))||undefined,nif:f.get('nif')||undefined};if(product.product_type!=='digital')customer.address={line1:[f.get('line1'),f.get('number')].filter(Boolean).join(', '),line2:f.get('line2')||undefined,postal_code:f.get('postal_code'),city:f.get('city'),region:f.get('region'),country:'PT'};
- let body=JSON.stringify({attempt:id,visit:checkoutAttribution(product.id).visit,quantity,method,customer});
- if(submitted && body!==submitted && !uncertain){id=crypto.randomUUID();body=JSON.stringify({attempt:id,visit:checkoutAttribution(product.id).visit,quantity,method,customer});}
+ let body=JSON.stringify({attempt:id,visit:checkoutAttribution(product.id).visit,tracking:checkoutAttribution(product.id),quantity,method,customer});
+ if(submitted && body!==submitted && !uncertain){id=crypto.randomUUID();body=JSON.stringify({attempt:id,visit:checkoutAttribution(product.id).visit,tracking:checkoutAttribution(product.id),quantity,method,customer});}
  if(uncertain && submitted)body=submitted;
  setAttempt(id);setSubmitted(body);sessionStorage.setItem(storage,JSON.stringify({attempt:id,body}));
  try{const r=await fetch('/api/pt/products/'+product.id,{method:'POST',headers:{'Content-Type':'application/json'},body});const data=await r.json();if(!r.ok){setWaitUntil(Date.now()+(data.error?.retry_after_seconds||0)*1000);setUncertain(r.status>=500);throw new Error(data.error?.message||'Não foi possível iniciar o pagamento.');}setOrder(data);setUncertain(false);sessionStorage.setItem(storage,JSON.stringify({attempt:id,body,order:data}));}catch(e){setError((e as Error).message);if(e instanceof TypeError)setUncertain(true);}finally{setBusy(false);}}

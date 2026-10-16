@@ -40,10 +40,10 @@ export default function TrackingAdmin() {
   }
   return <div className="section-stack">
     <section className="surface">
-      <div className="panel-heading"><div><h3>TikTok · Pixels</h3><p>Loja gateway · Brasil · BRL</p></div>
+      <div className="panel-heading"><div><h3>TikTok · Pixels</h3><p>Loja gateway · Portugal · EUR</p></div>
         <button className="secondary-button" onClick={load}>Atualizar</button></div>
-      <p>Entrada: InitiateCheckout · Pix gerado: Purchase + AddPaymentInfo + PixGenerated.</p>
-      <p>Nos novos pedidos, Purchase representa o Pix gerado, mesmo antes do pagamento. A aprovação não envia outro Purchase. Use os indicadores do gateway para conferir vendas pagas; compras e receita no TikTok podem incluir Pix não pagos. Pedidos anteriores mantêm o gatilho original.</p>
+      <p>Entrada: InitiateCheckout · Pagamento criado: AddPaymentInfo · Pagamento aprovado: Purchase.</p>
+      <p>Purchase é enviado após confirmação do pagamento pelo gateway. Os eventos são enviados pelo servidor, com deduplicação e novas tentativas em caso de falha.</p>
       {data?.test_mode && <p className="notice">Modo de teste ativo neste ambiente.</p>}
       {error && <p role="alert">{error}</p>}
       {data?.pixels.map((pixel: any) => <div className="panel-heading" key={pixel.pixel_id}>

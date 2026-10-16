@@ -379,7 +379,7 @@ async function handle(request: Request) {
     if (path.startsWith("admin/products/") && method === "POST")
       return json(await saveProduct(request, user.email, path.slice(15)));
     if (path === "admin/overview" && method === "GET") {
-      after(async () => { await Promise.all([pushBackground(), trackerOrderBackground()]); });
+      after(async () => { await Promise.all([pushBackground(), trackerOrderBackground(), trackingBackground()]); });
       const day =
         url.searchParams.get("date") ||
         new Date().toLocaleDateString("en-CA", {

@@ -1,3 +1,4 @@
+import { trackingBackground } from '@/lib/server/tiktok';
 import { after } from 'next/server';
 import { admin, json, route } from '@/lib/server/core';
 import { ptCreate, ptStatus, ptWebhook, ptOverview, ptConfigure, ptRefund, sendVoucherEmails, ptProviderOrders, ptProviderOrder } from '@/lib/server/portugal';
@@ -10,10 +11,10 @@ async function handle(request:Request) {
   return route(async()=> {
     try {
       const path=new URL(request.url).pathname.replace('/api/pt/','');
-      if(path==='webhook' && request.method==='POST') { await ptWebhook(request); after(pushBackground); return json({received:true}); }
+      if(path==='webhook' && request.method==='POST') { await ptWebhook(request); after(async()=>{await Promise.all([pushBackground(),trackingBackground()]);}); return json({received:true}); }
       if(path.startsWith('products/') && request.method==='POST') {
         const result=await ptCreate(request,path.slice(9));
-        after(async()=>{await Promise.all([sendVoucherEmails(),pushBackground()]);}); return json(result);
+        after(async()=>{await Promise.all([sendVoucherEmails(),pushBackground(),trackingBackground()]);}); return json(result);
       }
       if(path.startsWith('orders/') && request.method==='GET') return json(await ptStatus(path.slice(7)));
       const user=await admin(request);
