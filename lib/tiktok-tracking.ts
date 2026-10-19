@@ -1,5 +1,5 @@
 "use client";
-type Attribution = { visit: string; ttclid?: string; ttp?: string };
+type Attribution = { visit: string; ttclid?: string; ttp?: string; fbc?: string; fbp?: string };
 const memory = new Map<string, Attribution>();
 export function checkoutAttribution(product: string): Attribution {
   let value = memory.get(product);
@@ -19,6 +19,14 @@ export function checkoutAttribution(product: string): Attribution {
   const cookie = document.cookie.split(/;\s*/).find(c => c.startsWith("_ttp="))?.slice(5);
   const ttp = forwarded && /^[A-Za-z0-9_.~-]{1,250}$/.test(forwarded) ? forwarded : cookie;
   if (ttp && /^[A-Za-z0-9_.~-]{1,250}$/.test(ttp)) value.ttp = ttp;
+  const metaCookie = (name: string) => document.cookie.split(/;\s*/).find(c => c.startsWith(name + "="))?.slice(name.length + 1);
+  const fbc = params.get("fbc") || metaCookie("_fbc");
+  const fbp = params.get("fbp") || metaCookie("_fbp");
+  if (fbc && /^fb\.\d+\.\d{13}\.[A-Za-z0-9_-]{1,500}$/.test(fbc)) value.fbc = fbc;
+  if (fbp && /^fb\.\d+\.\d{13}\.\d{1,30}$/.test(fbp)) value.fbp = fbp;
+  const fbclid = params.get("fbclid");
+  if (fbclid && /^[A-Za-z0-9_-]{1,500}$/.test(fbclid) && !value.fbc?.endsWith("." + fbclid))
+    value.fbc = `fb.1.${Date.now()}.${fbclid}`;
   memory.set(product, value);
   try { sessionStorage.setItem("tiktok:" + product, JSON.stringify(value)); } catch {}
   return value;

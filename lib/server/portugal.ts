@@ -1,4 +1,5 @@
 import { trackingInput, rememberOrderTracking, safeTrackTransaction } from './tiktok';
+import { rememberMetaOrder, queueMetaOrder } from './meta';
 import { z } from 'zod';
 import { db, env, now, setting, putSetting, audit, rateLimit } from './core';
 import { ApiError, seal, unseal, hash, verify, readJson, assertOrigin } from './security';
@@ -90,6 +91,8 @@ export async function ptCreate(request: Request, productId: string) {
     o = await get(id);
     if (o.request_hash !== fingerprint) throw new ApiError(409, 'attempt_changed', 'Tentativa já utilizada.');
   }
+  try { await rememberMetaOrder(request,o,input.customer,input.quantity,input.tracking); }
+  catch { console.error('Meta attribution unavailable; payment preserved'); }
   if (input.tracking) {
     try { await rememberOrderTracking(request,id,productId,input.tracking,{email:input.customer.email,phone:input.customer.phone||''},input.quantity,true); }
     catch { console.error('TikTok attribution unavailable; payment preserved'); }
@@ -134,6 +137,8 @@ async function applyOrder(o: any, value: unknown, confirmed: boolean, eventId?: 
     WHERE t.id=? AND t.status IN ('PENDING','PAID') AND
     CASE WHEN t.status='PAID' THEN t.paid_at ELSE t.created_at END>=CAST(s.value AS INTEGER)`).bind(o.method,o.id));
   await db().batch(writes);
+  try { await queueMetaOrder(o.id); }
+  catch { console.error('Meta queue deferred; payment preserved'); }
   try { await safeTrackTransaction(await db().prepare('SELECT * FROM transactions WHERE id=?').bind(o.id).first()); }
   catch { console.error('TikTok reconciliation deferred; payment preserved'); }
 }

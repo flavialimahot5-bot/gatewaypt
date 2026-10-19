@@ -1,4 +1,5 @@
 import { isIP } from "node:net";
+import { metaBackground } from "./meta";
 import { z } from "zod";
 import { db, env, now, rateLimit, audit } from "./core";
 import { ApiError, assertOrigin, hash, readJson, seal, unseal } from "./security";
@@ -9,6 +10,8 @@ export const trackingInput = z.object({
   visit: z.string().uuid(),
   ttclid: z.string().regex(/^[A-Za-z0-9_.~-]{1,500}$/).optional(),
   ttp: z.string().regex(/^[A-Za-z0-9_.~-]{1,250}$/).optional(),
+  fbc: z.string().regex(/^fb\.\d+\.\d{13}\.[A-Za-z0-9_-]{1,500}$/).optional(),
+  fbp: z.string().regex(/^fb\.\d+\.\d{13}\.\d{1,30}$/).optional(),
 }).strict();
 type Attribution = z.infer<typeof trackingInput>;
 type Context = {
@@ -205,4 +208,5 @@ export async function dispatchTracking(limit = 5) {
 export async function trackingBackground() {
   try { await reconcileTracking(); await dispatchTracking(); }
   catch { console.error("TikTok background delivery unavailable"); }
+  await metaBackground();
 }
