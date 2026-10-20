@@ -1,5 +1,6 @@
 import { isIP } from "node:net";
 import { metaBackground } from "./meta";
+import { utmInput, utmifyBackground } from "./utmify";
 import { z } from "zod";
 import { db, env, now, rateLimit, audit } from "./core";
 import { ApiError, assertOrigin, hash, readJson, seal, unseal } from "./security";
@@ -12,6 +13,7 @@ export const trackingInput = z.object({
   ttp: z.string().regex(/^[A-Za-z0-9_.~-]{1,250}$/).optional(),
   fbc: z.string().regex(/^fb\.\d+\.\d{13}\.[A-Za-z0-9_-]{1,500}$/).optional(),
   fbp: z.string().regex(/^fb\.\d+\.\d{13}\.\d{1,30}$/).optional(),
+  utm: utmInput.optional(),
 }).strict();
 type Attribution = z.infer<typeof trackingInput>;
 type Context = {
@@ -97,7 +99,7 @@ async function queueEvent(event: "InitiateCheckout" | "PixGenerated" | "AddPayme
 export async function startCheckoutTracking(request: Request) {
   assertOrigin(request, env.APP_ORIGIN || "");
   const body = z.object({ product_id: z.string().regex(/^prd_[A-Za-z0-9_-]{43}$/), tracking: trackingInput }).strict()
-    .parse(await readJson(request, 2500));
+    .parse(await readJson(request, 8000));
   await rateLimit("tracking:global", 300);
   await rateLimit("tracking:visit:" + body.tracking.visit, 10);
   const product = await db().prepare("SELECT id,amount FROM products WHERE id=? AND active=1")
@@ -209,4 +211,5 @@ export async function trackingBackground() {
   try { await reconcileTracking(); await dispatchTracking(); }
   catch { console.error("TikTok background delivery unavailable"); }
   await metaBackground();
+  await utmifyBackground();
 }

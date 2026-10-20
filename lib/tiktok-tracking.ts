@@ -1,5 +1,5 @@
 "use client";
-type Attribution = { visit: string; ttclid?: string; ttp?: string; fbc?: string; fbp?: string };
+type Attribution = { visit: string; ttclid?: string; ttp?: string; fbc?: string; fbp?: string; utm?: Record<string,string> };
 const memory = new Map<string, Attribution>();
 export function checkoutAttribution(product: string): Attribution {
   let value = memory.get(product);
@@ -11,6 +11,14 @@ export function checkoutAttribution(product: string): Attribution {
     value ||= { visit: crypto.randomUUID() };
   }
   const params = new URL(location.href).searchParams;
+  const utmKeys = ["src", "sck", "utm_source", "utm_campaign", "utm_medium", "utm_content", "utm_term"];
+  if (utmKeys.some(k => params.has(k))) {
+    value.utm = {};
+    for (const k of utmKeys) {
+      const entry = params.get(k);
+      if (entry) value.utm[k] = entry.slice(0,500);
+    }
+  }
   const click = params.get("ttclid");
   if (click && /^[A-Za-z0-9_.~-]{1,500}$/.test(click)) value.ttclid = click;
   // The sales page and checkout use separate domains, so its _ttp cookie is

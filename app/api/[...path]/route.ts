@@ -1,4 +1,5 @@
 import { ptOverview, reconcilePortugalOrders } from "@/lib/server/portugal";
+import { utmifyOverview, saveUtmify, testUtmify, utmifyBackground } from "@/lib/server/utmify";
 import {
   findProduct,
   publicProduct,
@@ -323,6 +324,16 @@ async function handle(request: Request) {
       throw new ApiError(404, "not_found", "Endpoint não encontrado.");
     const user = await admin(request);
     await rateLimit("admin:" + user.userId, 120);
+    if (path === "admin/integrations/utmify" && method === "GET") {
+      after(utmifyBackground);
+      return json(await utmifyOverview());
+    }
+    if (path === "admin/integrations/utmify" && method === "POST")
+      return json(await saveUtmify(await readJson(request,5000),user.email));
+    if (path === "admin/integrations/utmify/test" && method === "POST") {
+      await rateLimit("utmify-test:"+user.email,3);
+      return json(await testUtmify(user.email));
+    }
     if (path === 'admin/store-orders' && method === 'GET') return json(await adminStoreOrders());
     if (path.startsWith('admin/store-orders/') && method === 'GET') return json(await adminStoreOrders(path.slice('admin/store-orders/'.length)));
     if (path === "admin/integrations/trackerorder" && method === "GET") return json(await trackerOrderOverview());

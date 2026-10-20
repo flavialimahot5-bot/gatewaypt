@@ -1,5 +1,6 @@
 import { trackingInput, rememberOrderTracking, safeTrackTransaction } from './tiktok';
 import { rememberMetaOrder, queueMetaOrder } from './meta';
+import { rememberUtmifyOrder } from './utmify';
 import { z } from 'zod';
 import { db, env, now, setting, putSetting, audit, rateLimit } from './core';
 import { ApiError, seal, unseal, hash, verify, readJson, assertOrigin } from './security';
@@ -93,6 +94,8 @@ export async function ptCreate(request: Request, productId: string) {
   }
   try { await rememberMetaOrder(request,o,input.customer,input.quantity,input.tracking); }
   catch { console.error('Meta attribution unavailable; payment preserved'); }
+  try { await rememberUtmifyOrder(request,o,input.tracking?.utm); }
+  catch { console.error('UTMify attribution unavailable; payment preserved'); }
   if (input.tracking) {
     try { await rememberOrderTracking(request,id,productId,input.tracking,{email:input.customer.email,phone:input.customer.phone||''},input.quantity,true); }
     catch { console.error('TikTok attribution unavailable; payment preserved'); }
