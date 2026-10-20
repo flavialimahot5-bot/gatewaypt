@@ -1,7 +1,9 @@
 # UTMify no checkout Portugal
 
 Configuração no painel: **Desenvolvedor → UTMify · Rastreamento de vendas**.
-Salve a credencial, valide a conexão e ative os envios. Não é necessário colocar
+Cole a credencial e clique em **Ativar envios**: o painel salva, valida a conexão
+sem registrar venda e ativa os envios. Falhas aparecem junto aos botões e por
+notificação; cada solicitação tem limite de 25 segundos. Não é necessário colocar
 o token nas variáveis da Vercel. Cada banco tem sua própria configuração,
 criptografada com `APP_ENCRYPTION_KEY`. O painel nunca devolve o token salvo.
 
@@ -11,7 +13,9 @@ O valor inicial enviado é `mbway`, sem inventar que a cobrança foi Pix ou cart
 A validação usa `isTest: true`: conforme o documento, valida o pedido sem salvar
 uma venda. A integração só pode ser ativada após a API aceitar o token e o método.
 Se MB WAY for recusado, confirme com o suporte da UTMify o método compatível e
-selecione-o em “Compatibilidade do método de pagamento”, salve e valide novamente.
+selecione-o em “Compatibilidade do método de pagamento” e ative novamente.
+A categoria Pix pode representar MB WAY apenas no relatório mediante escolha
+explícita do responsável; o pagamento real e a moeda EUR não são alterados.
 
 ## Estados e dados
 

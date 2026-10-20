@@ -76,7 +76,7 @@ async function send(token:string,payload:unknown):Promise<string|null> {
     let result:any;
     try { result=text ? JSON.parse(text) : null; } catch { return "invalid_response"; }
     // Restrict diagnostics to known fields; never expose response bodies containing customers or tokens.
-    if (!response.ok || result?.error || result?.success === false) {
+    if (!response.ok || result?.error || result?.success === false || result?.OK === false) {
       const serialized=JSON.stringify(result || {});
       if (serialized.includes("paymentMethod")) return "payment_method_rejected";
       if (response.status===401 || response.status===403 || serialized.includes("API_CREDENTIAL_NOT_FOUND")) return "token_rejected";
